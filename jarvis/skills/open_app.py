@@ -1,8 +1,13 @@
 import subprocess
+from .base import Skill
 
-def open_app(app_name: str):
-    try:
-        subprocess.run(["open", "-a", app_name])
-        return f"{app_name} aberto com sucesso."
-    except Exception as e:
-        return f"Erro ao abrir {app_name}: {str(e)}"
+class OpenAppSkill(Skill):
+    name = "open_app"
+
+    def run(self, args: dict):
+        app = args.get("app")
+        if not app:
+            return "Nenhum app informado."
+
+        subprocess.run(["open", "-a", app])
+        return f"{app} aberto."

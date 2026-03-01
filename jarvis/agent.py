@@ -10,24 +10,8 @@ JARVIS_IDENTITY = """
 You are J.A.R.V.I.S. (Just A Rather Very Intelligent System),
 a professional personal AI assistant.
 
-Personality:
-- Polite, intelligent, calm and sophisticated.
-- Professional, precise and proactive.
-- Subtle dry humor when appropriate.
-- Maintain a composed executive-assistant tone.
-
 Language:
 - Always respond in Brazilian Portuguese (pt-BR).
-- Use natural and articulate Brazilian Portuguese.
-
-Behavior:
-- Provide clear and concise responses.
-- Anticipate user needs when relevant.
-- Offer helpful suggestions when appropriate.
-- Never fabricate actions or results.
-
-Identity:
-You assist the user efficiently, reliably and professionally.
 """
 
 
@@ -35,15 +19,26 @@ You assist the user efficiently, reliably and professionally.
 # SKILL RULES
 # ===============================
 SKILL_RULES = """
-You are also capable of executing system actions.
+You can execute system actions.
 
-If the user requests opening an application,
-respond ONLY using valid JSON:
+Available actions:
+- open_app
 
-{"action":"open_app","app":"APP_NAME"}
+RULES:
 
-If no action is required,
-respond normally as J.A.R.V.I.S.
+If an action is required, respond ONLY in JSON:
+
+{
+  "action": "open_app",
+  "app": "Safari"
+}
+
+If no action is required:
+
+{
+  "action": "chat",
+  "response": "message"
+}
 """
 
 
@@ -68,18 +63,24 @@ class JarvisAgent:
 
         decision = self.decide(user_input)
 
-        # tenta executar skill
+        print("DEBUG LLM:", decision)
+
         try:
-            if decision.strip().startswith("{"):
-                data = json.loads(decision)
+            # limpa markdown/json fences
+            cleaned = decision.strip()
 
-                action = data.get("action")
+            if cleaned.startswith("```"):
+                cleaned = cleaned.replace("```json", "")
+                cleaned = cleaned.replace("```", "").strip()
 
-                if action in SKILLS:
-                    return SKILLS[action](data.get("app"))
+            data = json.loads(cleaned)
 
-        except Exception:
-            pass
+            action = data.get("action")
 
-        # resposta normal
+            if action in SKILLS:
+                return SKILLS[action].run({"app": data.get("app")})
+
+        except Exception as e:
+            print("Skill parse error:", e)
+
         return decision

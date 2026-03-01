@@ -1,5 +1,5 @@
-from .open_app import open_app
+from .open_app import OpenAppSkill
 
 SKILLS = {
-    "open_app": open_app,
+    "open_app": OpenAppSkill(),
 }
