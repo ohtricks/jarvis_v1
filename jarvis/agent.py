@@ -2,6 +2,7 @@ import json
 import os
 from .brain import ask_llm
 from .skills.registry import build_skills
+from .memory import add_turn, build_context, clear_memory, should_inject_memory
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
@@ -41,20 +42,22 @@ Se não precisar ação:
 {"action":"chat","response":"mensagem em pt-BR"}
 """
 
+
 def clean_json(text: str) -> str:
     t = (text or "").strip()
     if t.startswith("```"):
         t = t.replace("```json", "").replace("```", "").strip()
     return t
 
+
 def safe_load(text: str) -> dict:
     return json.loads(clean_json(text))
 
+
 class JarvisAgent:
     def __init__(self, execute: bool = False):
-        from .skills.registry import build_skills
         self.SKILLS = build_skills(execute=execute)
-        
+
     def route(self, user_input: str) -> dict:
         msgs = [
             {"role": "system", "content": ROUTER_PROMPT},
@@ -78,8 +81,12 @@ class JarvisAgent:
         return {"route": data["route"], "needs_actions": bool(data.get("needs_actions", True))}
 
     def decide(self, user_input: str, model: str) -> dict:
+        # injeta memória só quando fizer sentido (pra não gastar tokens à toa)
+        context = build_context(max_turns=4) if should_inject_memory(user_input) else ""
+        system_prompt = EXECUTOR_PROMPT + ("\n\n" + context if context else "")
+
         msgs = [
-            {"role": "system", "content": EXECUTOR_PROMPT},
+            {"role": "system", "content": system_prompt},  # <-- FIX: usar system_prompt com memória
             {"role": "user", "content": user_input},
         ]
         raw = ask_llm(msgs, model=model, temperature=0.1)
@@ -88,6 +95,19 @@ class JarvisAgent:
         return safe_load(raw)
 
     def run(self, user_input: str) -> str:
+        def remember(response: str) -> str:
+            try:
+                add_turn(user_input, response)
+            except Exception as e:
+                if DEBUG:
+                    print("DEBUG MEMORY ERROR:", e)
+            return response
+
+        cmd = user_input.strip().lower()
+        if cmd in ("limpar memoria", "limpar memória", "clear memory", "reset memory"):
+            clear_memory()
+            return "Memória limpa."
+
         # 1) Router (FAST)
         try:
             r = self.route(user_input)
@@ -98,7 +118,7 @@ class JarvisAgent:
 
         # 2) Fast reply (1 chamada total)
         if r["route"] == "fast_reply":
-            return r["response"]
+            return remember(r["response"])
 
         model = r["route"]  # brain ou reasoning
 
@@ -112,7 +132,7 @@ class JarvisAgent:
             if model != "reasoning":
                 d = self.decide(user_input, model="reasoning")
             else:
-                return "Não consegui processar seu pedido agora."
+                return remember("Não consegui processar seu pedido agora.")
 
         # 4) Multi actions
         if "actions" in d and isinstance(d["actions"], list):
@@ -124,16 +144,16 @@ class JarvisAgent:
                     results.append(self.SKILLS[action].run(args))
                 else:
                     results.append(f"Ação desconhecida: {action}")
-            return "\n".join(results)
+            return remember("\n".join(results))
 
         # 5) Single action / chat
         action = d.get("action")
 
         if action == "chat":
-            return d.get("response", "")
+            return remember(d.get("response", ""))
 
         if action in self.SKILLS:
             args = {k: v for k, v in d.items() if k != "action"}
-            return self.SKILLS[action].run(args)
+            return remember(self.SKILLS[action].run(args))
 
-        return "Não entendi como executar isso ainda."
+        return remember("Não entendi como executar isso ainda.")

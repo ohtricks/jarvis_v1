@@ -4,6 +4,13 @@ jarvis/__init__.py
 jarvis/agent.py
 jarvis/brain.py
 jarvis/main.py
+jarvis/memory.py
+jarvis/skills/__init__.py
+jarvis/skills/base.py
+jarvis/skills/open_app.py
+jarvis/skills/open_url.py
+jarvis/skills/registry.py
+jarvis/skills/run_shell.py
 jarvis_ai.egg-info/PKG-INFO
 jarvis_ai.egg-info/SOURCES.txt
 jarvis_ai.egg-info/dependency_links.txt
