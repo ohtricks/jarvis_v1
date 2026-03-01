@@ -1,7 +1,7 @@
 import json
 import os
 from .brain import ask_llm
-from .skills.registry import SKILLS
+from .skills.registry import build_skills
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
@@ -24,12 +24,18 @@ Responda APENAS JSON válido, sem texto extra.
 
 Ações disponíveis:
 - open_app
+- open_url
+- run_shell
 
 Se 1 ação:
 {"action":"open_app","app":"Safari"}
+{"action":"open_url","url":"https://mail.google.com","browser":"Google Chrome"}
+{"action":"run_shell","command":"git status","cwd":"/caminho/opcional"}
 
 Se várias ações:
 {"actions":[{"action":"open_app","app":"Safari"},{"action":"open_app","app":"Visual Studio Code"}]}
+{"actions":[{"action":"open_app","app":"Google Chrome"}, {"action":"open_url","url":"https://mail.google.com","browser":"Google Chrome"}]}
+{"actions":[{"action":"run_shell","command":"pwd"},{"action":"run_shell","command":"ls"}]}
 
 Se não precisar ação:
 {"action":"chat","response":"mensagem em pt-BR"}
@@ -45,6 +51,10 @@ def safe_load(text: str) -> dict:
     return json.loads(clean_json(text))
 
 class JarvisAgent:
+    def __init__(self, execute: bool = False):
+        from .skills.registry import build_skills
+        self.SKILLS = build_skills(execute=execute)
+        
     def route(self, user_input: str) -> dict:
         msgs = [
             {"role": "system", "content": ROUTER_PROMPT},
@@ -109,8 +119,9 @@ class JarvisAgent:
             results = []
             for step in d["actions"]:
                 action = step.get("action")
-                if action in SKILLS:
-                    results.append(SKILLS[action].run({"app": step.get("app")}))
+                if action in self.SKILLS:
+                    args = {k: v for k, v in step.items() if k != "action"}
+                    results.append(self.SKILLS[action].run(args))
                 else:
                     results.append(f"Ação desconhecida: {action}")
             return "\n".join(results)
@@ -121,7 +132,8 @@ class JarvisAgent:
         if action == "chat":
             return d.get("response", "")
 
-        if action in SKILLS:
-            return SKILLS[action].run({"app": d.get("app")})
+        if action in self.SKILLS:
+            args = {k: v for k, v in d.items() if k != "action"}
+            return self.SKILLS[action].run(args)
 
         return "Não entendi como executar isso ainda."
