@@ -2,7 +2,7 @@ import json
 import os
 from .brain import ask_llm
 from .skills.registry import build_skills
-from .memory import add_turn, build_context, clear_memory, should_inject_memory
+from .memory import add_turn, build_context, clear_memory, should_inject_memory, set_state
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
@@ -95,6 +95,40 @@ class JarvisAgent:
         return safe_load(raw)
 
     def run(self, user_input: str) -> str:
+        def learn_state_from_action(action: str, args: dict):
+            patch = {}
+
+            if action == "open_app":
+                app = args.get("app")
+                if app:
+                    patch["last_opened_app"] = app
+                    # heurística simples: browsers
+                    if app.lower() in ("google chrome", "chrome", "safari", "firefox", "microsoft edge", "edge"):
+                        patch["current_browser"] = app
+
+            elif action == "open_url":
+                url = args.get("url")
+                browser = args.get("browser")
+                if url:
+                    patch["last_opened_url"] = url
+                if browser:
+                    patch["current_browser"] = browser
+
+            elif action == "run_shell":
+                cmd = args.get("command")
+                cwd = args.get("cwd")
+                if cmd:
+                    patch["last_shell_command"] = cmd
+                if cwd:
+                    patch["last_cwd"] = cwd
+
+            if patch:
+                try:
+                    set_state(patch)
+                except Exception as e:
+                    if DEBUG:
+                        print("DEBUG STATE ERROR:", e)
+
         def remember(response: str) -> str:
             try:
                 add_turn(user_input, response)
@@ -141,6 +175,7 @@ class JarvisAgent:
                 action = step.get("action")
                 if action in self.SKILLS:
                     args = {k: v for k, v in step.items() if k != "action"}
+                    learn_state_from_action(action, args)
                     results.append(self.SKILLS[action].run(args))
                 else:
                     results.append(f"Ação desconhecida: {action}")
@@ -154,6 +189,7 @@ class JarvisAgent:
 
         if action in self.SKILLS:
             args = {k: v for k, v in d.items() if k != "action"}
+            learn_state_from_action(action, args)
             return remember(self.SKILLS[action].run(args))
 
         return remember("Não entendi como executar isso ainda.")

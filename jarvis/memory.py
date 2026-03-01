@@ -1,12 +1,10 @@
 import json
-import os
 from pathlib import Path
 from datetime import datetime
 from typing import Any
 
-
 MEMORY_PATH = Path.home() / ".jarvis" / "memory.json"
-MAX_TURNS = 6  # mantém leve
+MAX_TURNS = 6  # leve
 
 
 def _ensure_dir():
@@ -16,15 +14,17 @@ def _ensure_dir():
 def load_memory() -> dict[str, Any]:
     _ensure_dir()
     if not MEMORY_PATH.exists():
-        return {"turns": []}
+        return {"turns": [], "state": {}}
 
     try:
         data = json.loads(MEMORY_PATH.read_text(encoding="utf-8"))
         if "turns" not in data or not isinstance(data["turns"], list):
-            return {"turns": []}
+            data["turns"] = []
+        if "state" not in data or not isinstance(data["state"], dict):
+            data["state"] = {}
         return data
     except Exception:
-        return {"turns": []}
+        return {"turns": [], "state": {}}
 
 
 def save_memory(data: dict[str, Any]) -> None:
@@ -33,7 +33,7 @@ def save_memory(data: dict[str, Any]) -> None:
 
 
 def clear_memory() -> None:
-    save_memory({"turns": []})
+    save_memory({"turns": [], "state": {}})
 
 
 def add_turn(user_text: str, jarvis_text: str) -> None:
@@ -46,38 +46,55 @@ def add_turn(user_text: str, jarvis_text: str) -> None:
         "j": (jarvis_text or "").strip()[:500],
     })
 
-    # mantém só os últimos N
-    turns = turns[-MAX_TURNS:]
-    data["turns"] = turns
+    data["turns"] = turns[-MAX_TURNS:]
     save_memory(data)
 
 
-def build_context(max_turns: int = 4) -> str:
+def get_state() -> dict[str, Any]:
+    return load_memory().get("state", {}) or {}
+
+
+def set_state(patch: dict[str, Any]) -> None:
+    data = load_memory()
+    state = data.get("state", {}) or {}
+    # merge raso (V1)
+    for k, v in (patch or {}).items():
+        if v is None:
+            continue
+        state[k] = v
+    data["state"] = state
+    save_memory(data)
+
+
+def build_context(max_turns: int = 3) -> str:
     """
-    Contexto compacto e barato (para injetar no executor).
+    Contexto compacto: STATE + últimos turns.
+    Mantém tokens baixos.
     """
     data = load_memory()
-    turns = data.get("turns", [])[-max_turns:]
+    state = data.get("state", {}) or {}
+    turns = (data.get("turns", []) or [])[-max_turns:]
 
-    if not turns:
-        return ""
+    parts = []
 
-    lines = ["MEMORY (últimas interações):"]
-    for t in turns:
-        u = t.get("u", "")
-        j = t.get("j", "")
-        # bem curto, para não gastar tokens
-        lines.append(f"- U: {u}")
-        lines.append(f"  J: {j}")
+    if state:
+        # estado curto, estilo key=value
+        lines = ["STATE:"]
+        for k, v in state.items():
+            lines.append(f"- {k}: {v}")
+        parts.append("\n".join(lines))
 
-    return "\n".join(lines)
+    if turns:
+        lines = ["HISTORY (últimas interações):"]
+        for t in turns:
+            lines.append(f"- U: {t.get('u','')}")
+            lines.append(f"  J: {t.get('j','')}")
+        parts.append("\n".join(lines))
+
+    return "\n\n".join(parts).strip()
 
 
 def should_inject_memory(user_input: str) -> bool:
-    """
-    Só injeta memória quando a frase parece follow-up / referência.
-    Mantém custo baixo.
-    """
     s = (user_input or "").strip().lower()
     if not s:
         return False
@@ -85,11 +102,10 @@ def should_inject_memory(user_input: str) -> bool:
     followup_markers = [
         "agora", "também", "de novo", "novamente",
         "igual", "mesmo", "isso", "essa", "esse", "aquele",
-        "ali", "aí", "então", "depois", "em seguida",
-        "tambem",  # sem acento
+        "ali", "aí", "ai", "então", "entao", "depois", "em seguida",
+        "repete", "repetir",
     ]
 
-    # se for muito curto, é comum ser follow-up
     if len(s) <= 40:
         return True
 
