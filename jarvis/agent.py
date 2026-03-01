@@ -24,17 +24,23 @@ You can execute system actions.
 Available actions:
 - open_app
 
-RULES:
+Always respond ONLY in JSON.
 
-If an action is required, respond ONLY in JSON:
-
+If one action is required:
 {
   "action": "open_app",
   "app": "Safari"
 }
 
-If no action is required:
+If multiple actions are required:
+{
+  "actions": [
+    {"action": "open_app", "app": "Safari"},
+    {"action": "open_app", "app": "Visual Studio Code"}
+  ]
+}
 
+If no action is required:
 {
   "action": "chat",
   "response": "message"
@@ -75,10 +81,29 @@ class JarvisAgent:
 
             data = json.loads(cleaned)
 
+            data = json.loads(cleaned)
+
+            # 1) multi-actions
+            if "actions" in data and isinstance(data["actions"], list):
+                results = []
+                for step in data["actions"]:
+                    action = step.get("action")
+                    if action in SKILLS:
+                        results.append(SKILLS[action].run({"app": step.get("app")}))
+                    else:
+                        results.append(f"Ação desconhecida: {action}")
+                return "\n".join(results)
+
+            # 2) single action
             action = data.get("action")
+
+            if action == "chat":
+                return data.get("response")
 
             if action in SKILLS:
                 return SKILLS[action].run({"app": data.get("app")})
+
+            return f"Ação desconhecida: {action}"
 
         except Exception as e:
             print("Skill parse error:", e)
