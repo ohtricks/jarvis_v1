@@ -1,111 +1,127 @@
-from .brain import ask_brain
-from .skills.registry import SKILLS
 import json
+import os
+from .brain import ask_llm
+from .skills.registry import SKILLS
 
+DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
-# ===============================
-# JARVIS PERSONALITY
-# ===============================
-JARVIS_IDENTITY = """
-You are J.A.R.V.I.S. (Just A Rather Very Intelligent System),
-a professional personal AI assistant.
+# Router FAST: curtinho e claro
+ROUTER_PROMPT = """
+Você é um roteador. Responda APENAS JSON válido, sem texto extra.
 
-Language:
-- Always respond in Brazilian Portuguese (pt-BR).
+Formato:
+{"route":"fast_reply|brain|reasoning","needs_actions":true|false,"response":"..."}
+
+Regras:
+- Se for resposta curta e simples, sem abrir apps/usar tools: route="fast_reply", needs_actions=false e inclua "response" (pt-BR).
+- Se precisar abrir apps/usar tools (ex: abrir Safari, VSCode, Outlook): route="brain", needs_actions=true.
+- Se for tarefa complexa/multi-etapas (planejar, analisar, priorizar): route="reasoning", needs_actions=true.
 """
 
+# Executor: também curto e claro
+EXECUTOR_PROMPT = """
+Responda APENAS JSON válido, sem texto extra.
 
-# ===============================
-# SKILL RULES
-# ===============================
-SKILL_RULES = """
-You can execute system actions.
-
-Available actions:
+Ações disponíveis:
 - open_app
 
-Always respond ONLY in JSON.
+Se 1 ação:
+{"action":"open_app","app":"Safari"}
 
-If one action is required:
-{
-  "action": "open_app",
-  "app": "Safari"
-}
+Se várias ações:
+{"actions":[{"action":"open_app","app":"Safari"},{"action":"open_app","app":"Visual Studio Code"}]}
 
-If multiple actions are required:
-{
-  "actions": [
-    {"action": "open_app", "app": "Safari"},
-    {"action": "open_app", "app": "Visual Studio Code"}
-  ]
-}
-
-If no action is required:
-{
-  "action": "chat",
-  "response": "message"
-}
+Se não precisar ação:
+{"action":"chat","response":"mensagem em pt-BR"}
 """
 
+def clean_json(text: str) -> str:
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.replace("```json", "").replace("```", "").strip()
+    return t
+
+def safe_load(text: str) -> dict:
+    return json.loads(clean_json(text))
 
 class JarvisAgent:
-
-    def decide(self, user_input: str):
-
-        messages = [
-            {
-                "role": "system",
-                "content": JARVIS_IDENTITY + "\n" + SKILL_RULES
-            },
-            {
-                "role": "user",
-                "content": user_input
-            }
+    def route(self, user_input: str) -> dict:
+        msgs = [
+            {"role": "system", "content": ROUTER_PROMPT},
+            {"role": "user", "content": user_input},
         ]
+        raw = ask_llm(msgs, model="fast", temperature=0.0)
+        if DEBUG:
+            print("DEBUG ROUTER:", raw)
+        data = safe_load(raw)
 
-        return ask_brain(messages)
+        # validações mínimas
+        if data.get("route") not in ("fast_reply", "brain", "reasoning"):
+            return {"route": "brain", "needs_actions": True}
 
-    def run(self, user_input: str):
+        if data["route"] == "fast_reply":
+            resp = data.get("response", "").strip()
+            if not resp:
+                return {"route": "brain", "needs_actions": False}
+            return {"route": "fast_reply", "needs_actions": False, "response": resp}
 
-        decision = self.decide(user_input)
+        return {"route": data["route"], "needs_actions": bool(data.get("needs_actions", True))}
 
-        print("DEBUG LLM:", decision)
+    def decide(self, user_input: str, model: str) -> dict:
+        msgs = [
+            {"role": "system", "content": EXECUTOR_PROMPT},
+            {"role": "user", "content": user_input},
+        ]
+        raw = ask_llm(msgs, model=model, temperature=0.1)
+        if DEBUG:
+            print(f"DEBUG EXECUTOR({model}):", raw)
+        return safe_load(raw)
 
+    def run(self, user_input: str) -> str:
+        # 1) Router (FAST)
         try:
-            # limpa markdown/json fences
-            cleaned = decision.strip()
-
-            if cleaned.startswith("```"):
-                cleaned = cleaned.replace("```json", "")
-                cleaned = cleaned.replace("```", "").strip()
-
-            data = json.loads(cleaned)
-
-            data = json.loads(cleaned)
-
-            # 1) multi-actions
-            if "actions" in data and isinstance(data["actions"], list):
-                results = []
-                for step in data["actions"]:
-                    action = step.get("action")
-                    if action in SKILLS:
-                        results.append(SKILLS[action].run({"app": step.get("app")}))
-                    else:
-                        results.append(f"Ação desconhecida: {action}")
-                return "\n".join(results)
-
-            # 2) single action
-            action = data.get("action")
-
-            if action == "chat":
-                return data.get("response")
-
-            if action in SKILLS:
-                return SKILLS[action].run({"app": data.get("app")})
-
-            return f"Ação desconhecida: {action}"
-
+            r = self.route(user_input)
         except Exception as e:
-            print("Skill parse error:", e)
+            if DEBUG:
+                print("DEBUG ROUTER ERROR:", e)
+            r = {"route": "brain", "needs_actions": True}
 
-        return decision
+        # 2) Fast reply (1 chamada total)
+        if r["route"] == "fast_reply":
+            return r["response"]
+
+        model = r["route"]  # brain ou reasoning
+
+        # 3) Executor (brain/reasoning)
+        try:
+            d = self.decide(user_input, model=model)
+        except Exception as e:
+            if DEBUG:
+                print("DEBUG EXECUTOR ERROR:", e)
+            # fallback pro reasoning
+            if model != "reasoning":
+                d = self.decide(user_input, model="reasoning")
+            else:
+                return "Não consegui processar seu pedido agora."
+
+        # 4) Multi actions
+        if "actions" in d and isinstance(d["actions"], list):
+            results = []
+            for step in d["actions"]:
+                action = step.get("action")
+                if action in SKILLS:
+                    results.append(SKILLS[action].run({"app": step.get("app")}))
+                else:
+                    results.append(f"Ação desconhecida: {action}")
+            return "\n".join(results)
+
+        # 5) Single action / chat
+        action = d.get("action")
+
+        if action == "chat":
+            return d.get("response", "")
+
+        if action in SKILLS:
+            return SKILLS[action].run({"app": d.get("app")})
+
+        return "Não entendi como executar isso ainda."
