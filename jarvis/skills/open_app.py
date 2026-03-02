@@ -29,8 +29,12 @@ def normalize_app_name(name: str) -> str:
     key = name.strip().lower()
     return APP_ALIASES.get(key, name.strip())
 
+
 class OpenAppSkill(Skill):
     name = "open_app"
+
+    def __init__(self, execute: bool = False):
+        self.execute = execute
 
     def run(self, args: dict):
         app_raw = args.get("app")
@@ -39,5 +43,16 @@ class OpenAppSkill(Skill):
         if not app:
             return "Nenhum app informado."
 
-        subprocess.run(["open", "-a", app])
-        return f"{app} aberto."
+        if not self.execute:
+            return f"(dry-run) Eu abriria o app:\n{app}"
+
+        try:
+            subprocess.run(
+                ["open", "-a", app],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            return f"{app} aberto."
+        except Exception as e:
+            return f"Erro ao abrir app: {e}"

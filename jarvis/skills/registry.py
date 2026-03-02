@@ -5,7 +5,7 @@ from .run_shell import RunShellSkill
 
 def build_skills(execute: bool = False):
     return {
-        "open_app": OpenAppSkill(),
-        "open_url": OpenUrlSkill(),
+        "open_app": OpenAppSkill(execute=execute),
+        "open_url": OpenUrlSkill(execute=execute),
         "run_shell": RunShellSkill(execute=execute),
     }

@@ -3,10 +3,11 @@ from .memory import clear_memory, clear_active_plan, format_active_plan_status, 
 from .planner import continue_plan, run_plan_all, confirm_pending
 
 def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
-    c = (cmd or "").strip().lower()
+    c_raw = (cmd or "").strip()
+    c = c_raw.lower()
 
     # pendências (risk gate)
-    pending = confirm_pending(c, skills, learn_state_fn)
+    pending = confirm_pending(c_raw, skills, learn_state_fn)
     if pending is not None:
         return pending
 

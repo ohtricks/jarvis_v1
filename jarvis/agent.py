@@ -6,7 +6,7 @@ from .prompts import EXECUTOR_PROMPT
 from .utils import safe_load
 from .brain import ask_llm
 from .router import route_input
-from .planner import normalize_actions_to_plan, start_plan
+from .planner import normalize_actions_to_plan, start_plan, guarded_execute
 from .commands import handle_builtin
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
@@ -125,26 +125,39 @@ class JarvisAgent:
         if "plan" in d and isinstance(d["plan"], list):
             return remember(start_plan(d["plan"], user_input, self.SKILLS, learn_state_from_action))
 
-        # actions
+        # actions (APLICA RISK GATE para run_shell)
         if "actions" in d and isinstance(d["actions"], list):
             out = []
             for step in d["actions"]:
                 action = step.get("action")
                 if action in self.SKILLS:
                     args = {k: v for k, v in step.items() if k != "action"}
-                    learn_state_from_action(action, args)
-                    out.append(self.SKILLS[action].run(args))
+
+                    if action == "run_shell":
+                        executed, msg = guarded_execute(action, args, self.SKILLS, learn_state_from_action)
+                        out.append(msg)
+                        if not executed:
+                            # se pediu confirmação, para aqui
+                            break
+                    else:
+                        learn_state_from_action(action, args)
+                        out.append(self.SKILLS[action].run(args))
                 else:
                     out.append(f"Ação desconhecida: {action}")
             return remember("\n".join(out))
 
-        # single
+        # single (APLICA RISK GATE para run_shell)
         action = d.get("action")
         if action == "chat":
             return remember(d.get("response", ""))
 
         if action in self.SKILLS:
             args = {k: v for k, v in d.items() if k != "action"}
+
+            if action == "run_shell":
+                executed, msg = guarded_execute(action, args, self.SKILLS, learn_state_from_action)
+                return remember(msg)
+
             learn_state_from_action(action, args)
             return remember(self.SKILLS[action].run(args))
 

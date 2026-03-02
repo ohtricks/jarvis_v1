@@ -6,14 +6,15 @@ from .memory import (
 
 BROWSERS = ("google chrome", "chrome", "safari", "firefox", "microsoft edge", "edge")
 
+
 def normalize_actions_to_plan(d: dict) -> dict:
-    # se vier actions[] mas não vier plan[], transforma em plan[]
     if "plan" not in d and "actions" in d and isinstance(d["actions"], list):
         d["plan"] = []
         for a in d["actions"]:
             if isinstance(a, dict) and a.get("action"):
                 d["plan"].append({"step": a.get("action"), **a})
     return d
+
 
 def classify_action_risk(action: str, args: dict) -> tuple[str, str]:
     if action in ("open_app", "open_url"):
@@ -58,71 +59,120 @@ def classify_action_risk(action: str, args: dict) -> tuple[str, str]:
 
     return "risky", f"Confirmar execução: {cmd}"
 
-def guarded_execute(action: str, args: dict, skills: dict, learn_state_fn) -> tuple[bool, str]:
-    risk, note = classify_action_risk(action, args)
 
-    if risk == "safe":
-        learn_state_fn(action, args)
-        return True, skills[action].run(args)
-
-    set_pending_action({"action": action, **args})
-    set_pending_risk(risk, note)
-
+def _confirm_msg(risk: str, note: str) -> str:
     if risk == "danger":
-        return False, (
+        return (
             "⚠️ AÇÃO PERIGOSA detectada.\n"
             f"{note}\n\n"
             "Para confirmar, digite exatamente: YES I KNOW\n"
             "Para cancelar: jarvis no"
         )
-
-    return False, (
+    return (
         "⚠️ Confirmação necessária.\n"
         f"{note}\n\n"
         "Para confirmar: jarvis yes\n"
         "Para cancelar: jarvis no"
     )
 
+
+def guarded_execute(action: str, args: dict, skills: dict, learn_state_fn) -> tuple[bool, str]:
+    """
+    Executa se safe; se risky/danger, salva pendência e retorna mensagem.
+    """
+    risk, note = classify_action_risk(action, args)
+
+    if risk == "safe":
+        learn_state_fn(action, args)
+        return True, skills[action].run(args)
+
+    # pendência (guarda também o modo execute)
+    pending_execute = bool(getattr(skills.get(action), "execute", False))
+    set_pending_action({"action": action, **args, "_execute": pending_execute})
+    set_pending_risk(risk, note)
+    return False, _confirm_msg(risk, note)
+
+
+def _execute_pending_bypass(pending: dict, skills: dict, learn_state_fn) -> str:
+    """
+    Executa a pendência SEM reavaliar risco (bypass) e respeita o modo _execute salvo.
+    Isso permite:
+      jarvis --execute "rode git push"
+      jarvis yes
+    executar de verdade, mesmo sem --execute no segundo comando.
+    """
+    action = pending.get("action")
+    if not action:
+        return "Ação pendente inválida."
+
+    # monta args sem "action"
+    args = {k: v for k, v in pending.items() if k != "action"}
+
+    skill = skills.get(action)
+    if not skill:
+        return "Ação pendente inválida."
+
+    # força execute conforme foi salvo na pendência
+    pending_execute = bool(pending.get("_execute", False))
+    old_execute = getattr(skill, "execute", None)
+
+    try:
+        if old_execute is not None:
+            skill.execute = pending_execute
+        learn_state_fn(action, args)
+        return skill.run(args)
+    finally:
+        if old_execute is not None:
+            skill.execute = old_execute
+
+
 def confirm_pending(cmd: str, skills: dict, learn_state_fn) -> str | None:
-    c = (cmd or "").strip().lower()
+    """
+    Confirmação de pendência (SEM loop):
+    - yes confirma risky e EXECUTA (bypass do gate)
+    - YES I KNOW confirma danger e EXECUTA
+    - no cancela
+    """
+    c_raw = (cmd or "").strip()
+    c = c_raw.lower()
 
-    if c in ("yes", "y", "confirmar"):
-        pending, risk, note = get_pending()
-        if not pending:
-            return "Não há nenhuma ação pendente para confirmar."
-        if risk == "danger":
-            return "Esta ação é PERIGOSA. Para confirmar, digite exatamente: YES I KNOW"
+    pending, risk, note = get_pending()
+    has_pending = bool(pending)
 
-        action = pending.get("action")
-        args = {k: v for k, v in pending.items() if k != "action"}
-        set_pending_action(None)
-
-        if action in skills:
-            ok, out = guarded_execute(action, args, skills, learn_state_fn)
-            return out
-        return "Ação pendente inválida."
-
-    if c.replace('"', "").strip() == "yes i know":
-        pending, risk, note = get_pending()
-        if not pending:
-            return "Não há nenhuma ação pendente para confirmar."
-        action = pending.get("action")
-        args = {k: v for k, v in pending.items() if k != "action"}
-        set_pending_action(None)
-
-        if action in skills:
-            learn_state_fn(action, args)
-            return skills[action].run(args)
-        return "Ação pendente inválida."
-
-    if c in ("no", "n", "cancelar isso", "cancel"):
-        pending, risk, note = get_pending()
-        if not pending:
-            return "Ok."
+    # cancelar pendência
+    if c in ("no", "n", "cancelar", "cancel", "parar"):
+        if not has_pending:
+            return None
         set_pending_action(None)
         return "Cancelado."
 
+    # confirmar risky
+    if c in ("yes", "y", "confirmar"):
+        if not has_pending:
+            return None
+        if risk == "danger":
+            return "Esta ação é PERIGOSA. Para confirmar, digite exatamente: YES I KNOW"
+
+        # EXECUTA SEM reavaliar (bypass)
+        set_pending_action(None)
+        return _execute_pending_bypass(pending, skills, learn_state_fn)
+
+    # confirmar danger
+    if c_raw.replace('"', "").strip().upper() == "YES I KNOW":
+        if not has_pending:
+            return None
+
+        if risk != "danger":
+            # se não for danger, trata como yes normal (bypass)
+            set_pending_action(None)
+            return _execute_pending_bypass(pending, skills, learn_state_fn)
+
+        # danger confirmado
+        set_pending_action(None)
+        return _execute_pending_bypass(pending, skills, learn_state_fn)
+
     return None
+
 
 def start_plan(plan: list, goal_text: str, skills: dict, learn_state_fn) -> str:
     set_goal(goal_text)
@@ -154,6 +204,7 @@ def start_plan(plan: list, goal_text: str, skills: dict, learn_state_fn) -> str:
 
     advance_active_plan(1)
     return f"Ação desconhecida no plano: {action}. Diga 'continua' para pular."
+
 
 def continue_plan(skills: dict, learn_state_fn) -> str:
     plan, idx = get_active_plan()
@@ -190,6 +241,7 @@ def continue_plan(skills: dict, learn_state_fn) -> str:
 
     advance_active_plan(1)
     return f"Ação desconhecida no plano: {action}. Diga 'continua' para pular."
+
 
 def run_plan_all(skills: dict, learn_state_fn) -> str:
     plan, idx = get_active_plan()
