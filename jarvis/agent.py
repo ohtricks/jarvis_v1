@@ -1,164 +1,100 @@
-# jarvis/agent.py
 import os
 from .skills.registry import build_skills
-from .memory import add_turn, build_context, should_inject_memory, set_state
-from .prompts import EXECUTOR_PROMPT
-from .utils import safe_load
-from .brain import ask_llm
-from .router import route_input
-from .planner import normalize_actions_to_plan, start_plan, guarded_execute
+from .memory import add_turn, set_state, set_session
 from .commands import handle_builtin
+from .router import route_input, strip_forced_prefix
+from .planner import make_plan
+from .queue import enqueue_plan, clear_queue, has_active_queue
+from .executor import execute_next
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
-BROWSERS = ("google chrome", "chrome", "safari", "firefox", "microsoft edge", "edge")
+
 
 class JarvisAgent:
     def __init__(self, execute: bool = False):
         self.SKILLS = build_skills(execute=execute)
+        # session hint: se o user chamar com --execute, guarda cwd atual e mode execute (opcional)
+        if execute:
+            set_session({"mode": "execute"})
 
-    def decide(self, user_input: str, model: str) -> dict:
-        context = build_context(max_turns=4) if should_inject_memory(user_input) else ""
-        system_prompt = EXECUTOR_PROMPT + ("\n\n" + context if context else "")
-        msgs = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_input},
-        ]
-        raw = ask_llm(msgs, model=model, temperature=0.1)
-        if DEBUG:
-            print(f"DEBUG EXECUTOR({model}):", raw)
-        try:
-            return safe_load(raw)
-        except Exception:
-            return {"action": "chat", "response": raw}
+    def _learn_state_from_action(self, action: str, args: dict):
+        patch = {}
+        if action == "open_app":
+            app = args.get("app")
+            if app:
+                patch["last_opened_app"] = app
+                if app.lower() in ("google chrome", "chrome", "safari", "firefox", "microsoft edge", "edge"):
+                    patch["current_browser"] = app
+
+        elif action == "open_url":
+            url = args.get("url")
+            browser = args.get("browser")
+            if url:
+                patch["last_opened_url"] = url
+            if browser:
+                patch["current_browser"] = browser
+
+        elif action == "run_shell":
+            cmd = args.get("command")
+            cwd = args.get("cwd")
+            if cmd:
+                patch["last_shell_command"] = cmd
+            if cwd:
+                patch["last_cwd"] = cwd
+
+        if patch:
+            set_state(patch)
 
     def run(self, user_input: str) -> str:
-        def remember(response: str) -> str:
+        def remember(resp: str) -> str:
             try:
-                add_turn(user_input, response)
+                add_turn(user_input, resp)
             except Exception:
                 pass
-            return response
+            return resp
 
-        def learn_state_from_action(action: str, args: dict):
-            patch = {}
-            if action == "open_app":
-                app = args.get("app")
-                if app:
-                    patch["last_opened_app"] = app
-                    if app.lower() in BROWSERS:
-                        patch["current_browser"] = app
-            elif action == "open_url":
-                url = args.get("url")
-                browser = args.get("browser")
-                if url:
-                    patch["last_opened_url"] = url
-                if browser:
-                    patch["current_browser"] = browser
-            elif action == "run_shell":
-                cmd = args.get("command")
-                cwd = args.get("cwd")
-                if cmd:
-                    patch["last_shell_command"] = cmd
-                if cwd:
-                    patch["last_cwd"] = cwd
-            if patch:
-                set_state(patch)
+        # built-ins first (NO LLM)
+        out = handle_builtin(user_input, self.SKILLS, self._learn_state_from_action)
+        if out is not None:
+            return remember(out)
 
-        # forced prefix
-        forced = None
-        raw_text = (user_input or "").strip()
-        lower = raw_text.lower()
-        prefixes = {
-            "reason:": "reasoning",
-            "think:": "reasoning",
-            "plan:": "reasoning",
-            "brain:": "brain",
-            "fast:": "fast_reply",
-        }
-        for p, route in prefixes.items():
-            if lower.startswith(p):
-                forced = route
-                user_input = raw_text[len(p):].strip()
-                if DEBUG:
-                    print(f"DEBUG FORCED ROUTE: {forced} (prefix {p})")
-                break
+        # forced prefix handling
+        stripped, forced = strip_forced_prefix(user_input)
+        text = stripped
 
-        # built-in commands (NO LLM)
-        handled = handle_builtin((user_input or "").strip(), self.SKILLS, learn_state_from_action)
-        if handled is not None:
-            return remember(handled)
-
-        # routing
-        if forced == "fast_reply":
-            return remember(user_input)
-
-        if forced in ("brain", "reasoning"):
-            r = {"route": forced, "needs_actions": True}
+        # route
+        if forced:
+            r = {"route": forced, "needs_actions": forced != "fast_reply"}
         else:
-            try:
-                r = route_input(user_input, debug=DEBUG)
-            except Exception as e:
-                if DEBUG:
-                    print("DEBUG ROUTER ERROR:", e)
-                r = {"route": "brain", "needs_actions": True}
+            r = route_input(text)
 
         if r["route"] == "fast_reply":
-            return remember(r["response"])
+            return remember(r.get("response") or text)
 
-        model = r["route"]
+        # planner route => create queue + execute first step
+        if r["route"] == "planner":
+            plan_data = make_plan(text)
+            goal = plan_data["goal"]
+            plan = plan_data["plan"]
 
-        # decide
-        try:
-            d = self.decide(user_input, model=model)
-        except Exception as e:
-            if DEBUG:
-                print("DEBUG EXECUTOR ERROR:", e)
-            if model != "reasoning":
-                d = self.decide(user_input, model="reasoning")
-            else:
-                return remember("Não consegui processar seu pedido agora.")
+            clear_queue()
+            enqueue_plan(goal, plan)
 
-        # forced plan mode (plan:/think:/reason:) -> step-by-step
-        if forced == "reasoning":
-            d = normalize_actions_to_plan(d)
+            # execute first step automatically
+            first_out = execute_next(self.SKILLS, self._learn_state_from_action)
+            return remember(first_out + "\n\n➡️ Diga 'continue' para o próximo passo, ou 'executar tudo'.")
 
-        if "plan" in d and isinstance(d["plan"], list):
-            return remember(start_plan(d["plan"], user_input, self.SKILLS, learn_state_from_action))
+        # executor route => single-step queue (no planner)
+        if r["route"] == "executor":
+            # cria plano trivial via planner? não. tenta "smart": se o usuário escreveu algo tipo "abra X" ou "rode Y",
+            # aqui a V2 limpa usa planner para 1 step? (evita) -> por simplicidade, transforma em mini-plan via planner.
+            plan_data = make_plan(text)  # usa reasoning, mas reduz erro. Se quiser baratear, eu troco por EXECUTOR_PROMPT + brain.
+            goal = plan_data["goal"]
+            plan = plan_data["plan"][:1]  # só 1 passo
 
-        # actions (APLICA RISK GATE para run_shell)
-        if "actions" in d and isinstance(d["actions"], list):
-            out = []
-            for step in d["actions"]:
-                action = step.get("action")
-                if action in self.SKILLS:
-                    args = {k: v for k, v in step.items() if k != "action"}
+            clear_queue()
+            enqueue_plan(goal, plan)
 
-                    if action == "run_shell":
-                        executed, msg = guarded_execute(action, args, self.SKILLS, learn_state_from_action)
-                        out.append(msg)
-                        if not executed:
-                            # se pediu confirmação, para aqui
-                            break
-                    else:
-                        learn_state_from_action(action, args)
-                        out.append(self.SKILLS[action].run(args))
-                else:
-                    out.append(f"Ação desconhecida: {action}")
-            return remember("\n".join(out))
+            return remember(execute_next(self.SKILLS, self._learn_state_from_action))
 
-        # single (APLICA RISK GATE para run_shell)
-        action = d.get("action")
-        if action == "chat":
-            return remember(d.get("response", ""))
-
-        if action in self.SKILLS:
-            args = {k: v for k, v in d.items() if k != "action"}
-
-            if action == "run_shell":
-                executed, msg = guarded_execute(action, args, self.SKILLS, learn_state_from_action)
-                return remember(msg)
-
-            learn_state_from_action(action, args)
-            return remember(self.SKILLS[action].run(args))
-
-        return remember("Não entendi como executar isso ainda.")
+        return remember("Não consegui processar seu pedido agora.")

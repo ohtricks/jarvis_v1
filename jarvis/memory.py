@@ -1,203 +1,130 @@
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional, Tuple
 
-MEMORY_PATH = Path.home() / ".jarvis" / "memory.json"
-MAX_TURNS = 6  # leve
+JARVIS_DIR = Path.home() / ".jarvis"
+MEMORY_PATH = JARVIS_DIR / "memory.json"
+LOGS_DIR = JARVIS_DIR / "logs"
 
+MAX_TURNS = 8
 
-# ===============================
-# BASE IO
-# ===============================
 
 def _ensure_dir():
-    MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    JARVIS_DIR.mkdir(parents=True, exist_ok=True)
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _default() -> dict[str, Any]:
+    return {
+        "turns": [],
+        "state": {},
+        "session": {
+            "mode": "dry",  # dry|execute|safe
+            "default_browser": "Google Chrome",
+            "cwd": None,
+        },
+        "active_plan": {
+            "goal": None,
+            "plan": [],
+            "idx": 0,
+        },
+        "pending": {
+            "action": None,   # dict | None
+            "risk": None,     # safe|risky|danger|None
+            "note": None,     # str|None
+        },
+    }
 
 
 def load_memory() -> dict[str, Any]:
     _ensure_dir()
     if not MEMORY_PATH.exists():
-        return {"turns": [], "state": {}}
-
+        return _default()
     try:
         data = json.loads(MEMORY_PATH.read_text(encoding="utf-8"))
-        if "turns" not in data or not isinstance(data["turns"], list):
-            data["turns"] = []
-        if "state" not in data or not isinstance(data["state"], dict):
-            data["state"] = {}
-        return data
+        base = _default()
+        # merge shallow
+        for k, v in data.items():
+            base[k] = v
+        # ensure sub-objects
+        if not isinstance(base.get("turns"), list): base["turns"] = []
+        if not isinstance(base.get("state"), dict): base["state"] = {}
+        if not isinstance(base.get("session"), dict): base["session"] = _default()["session"]
+        if not isinstance(base.get("active_plan"), dict): base["active_plan"] = _default()["active_plan"]
+        if not isinstance(base.get("pending"), dict): base["pending"] = _default()["pending"]
+        return base
     except Exception:
-        return {"turns": [], "state": {}}
+        return _default()
 
 
 def save_memory(data: dict[str, Any]) -> None:
     _ensure_dir()
-    MEMORY_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8"
-    )
+    MEMORY_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def clear_memory() -> None:
-    save_memory({"turns": [], "state": {}})
-
-
-# ===============================
-# TURNS (chat history)
-# ===============================
-
+# -------------------------
+# Turns (chat history)
+# -------------------------
 def add_turn(user_text: str, jarvis_text: str) -> None:
-    data = load_memory()
-    turns = data.get("turns", [])
-
+    mem = load_memory()
+    turns = mem.get("turns", [])
     turns.append({
         "ts": datetime.utcnow().isoformat() + "Z",
-        "u": (user_text or "").strip()[:500],
-        "j": (jarvis_text or "").strip()[:500],
+        "u": (user_text or "").strip()[:600],
+        "j": (jarvis_text or "").strip()[:800],
     })
+    mem["turns"] = turns[-MAX_TURNS:]
+    save_memory(mem)
 
-    data["turns"] = turns[-MAX_TURNS:]
-    save_memory(data)
 
-
-# ===============================
-# STATE
-# ===============================
-
+# -------------------------
+# State (structured memory)
+# -------------------------
 def get_state() -> dict[str, Any]:
     return load_memory().get("state", {}) or {}
 
 
 def set_state(patch: dict[str, Any]) -> None:
-    data = load_memory()
-    state = data.get("state", {}) or {}
-
+    mem = load_memory()
+    state = mem.get("state", {}) or {}
     for k, v in (patch or {}).items():
         if v is None:
             continue
         state[k] = v
-
-    data["state"] = state
-    save_memory(data)
-
-
-# ===============================
-# ACTIVE GOAL MEMORY
-# ===============================
-
-def set_goal(goal: str | None) -> None:
-    if not goal:
-        return
-    set_state({"current_goal": goal.strip()[:200]})
+    mem["state"] = state
+    save_memory(mem)
 
 
-def get_goal() -> str:
-    return str(get_state().get("current_goal") or "")
-
-
-def set_active_plan(plan: list[dict], goal: str | None = None) -> None:
+def build_context(max_turns: int = 4) -> str:
     """
-    Salva plano ativo com índice inicial.
+    Contexto compacto para o LLM.
     """
-    patch = {
-        "active_plan": plan,
-        "active_plan_index": 0,
-    }
-    if goal:
-        patch["current_goal"] = goal.strip()[:200]
-
-    set_state(patch)
-
-
-def get_active_plan() -> tuple[list[dict], int]:
-    st = get_state()
-    plan = st.get("active_plan") or []
-    idx = int(st.get("active_plan_index") or 0)
-
-    if not isinstance(plan, list):
-        plan = []
-
-    return plan, idx
-
-
-def advance_active_plan(steps: int = 1) -> None:
-    st = get_state()
-    idx = int(st.get("active_plan_index") or 0)
-    idx += steps
-    set_state({"active_plan_index": max(idx, 0)})
-
-
-def clear_active_plan() -> None:
-    data = load_memory()
-    st = data.get("state", {}) or {}
-
-    st.pop("active_plan", None)
-    st.pop("active_plan_index", None)
-    st.pop("current_goal", None)
-
-    data["state"] = st
-    save_memory(data)
-
-
-def format_active_plan_status(max_items: int = 6) -> str:
-    plan, idx = get_active_plan()
-    goal = get_goal()
-
-    if not plan:
-        return "Não há plano ativo no momento."
-
-    lines = []
-
-    if goal:
-        lines.append(f"Objetivo atual: {goal}")
-
-    lines.append(f"Progresso: {min(idx, len(plan))}/{len(plan)}")
-    lines.append("Próximos passos:")
-
-    start = max(idx - 2, 0)
-    end = min(idx + max_items, len(plan))
-
-    for i in range(start, end):
-        item = plan[i]
-        step = item.get("step") or item.get("t") or ""
-        action = item.get("action") or ""
-
-        if i < idx:
-            mark = "✅"
-        elif i == idx:
-            mark = "➡️"
-        else:
-            mark = "•"
-
-        if step:
-            lines.append(f"{mark} [{i+1}] {step} ({action})")
-        else:
-            lines.append(f"{mark} [{i+1}] ({action})")
-
-    return "\n".join(lines)
-
-
-# ===============================
-# CONTEXT INJECTION
-# ===============================
-
-def build_context(max_turns: int = 3) -> str:
-    """
-    Contexto compacto: STATE + últimos turns.
-    Mantém tokens baixos.
-    """
-    data = load_memory()
-    state = data.get("state", {}) or {}
-    turns = (data.get("turns", []) or [])[-max_turns:]
+    mem = load_memory()
+    state = mem.get("state", {}) or {}
+    turns = (mem.get("turns", []) or [])[-max_turns:]
+    session = mem.get("session", {}) or {}
+    plan = mem.get("active_plan", {}) or {}
 
     parts = []
+
+    if session:
+        parts.append(
+            "SESSION:\n"
+            f"- mode: {session.get('mode')}\n"
+            f"- default_browser: {session.get('default_browser')}\n"
+            f"- cwd: {session.get('cwd')}"
+        )
 
     if state:
         lines = ["STATE:"]
         for k, v in state.items():
             lines.append(f"- {k}: {v}")
         parts.append("\n".join(lines))
+
+    goal = plan.get("goal")
+    if goal:
+        parts.append(f"ACTIVE_GOAL:\n- {goal}")
 
     if turns:
         lines = ["HISTORY (últimas interações):"]
@@ -206,50 +133,146 @@ def build_context(max_turns: int = 3) -> str:
             lines.append(f"  J: {t.get('j','')}")
         parts.append("\n".join(lines))
 
-    return "\n\n".join(parts).strip()
+    return "\n\n".join([p for p in parts if p]).strip()
 
 
 def should_inject_memory(user_input: str) -> bool:
     s = (user_input or "").strip().lower()
     if not s:
         return False
-
-    followup_markers = [
-        "agora", "também", "de novo", "novamente",
-        "igual", "mesmo", "isso", "essa", "esse", "aquele",
-        "ali", "aí", "ai", "então", "entao", "depois",
-        "em seguida", "repete", "repetir",
-        "continua", "continuar",
-    ]
-
-    if len(s) <= 40:
+    # Curto demais: quase sempre é follow-up.
+    if len(s) <= 50:
         return True
-
-    return any(m in s for m in followup_markers)
-
-
-def set_pending_action(action: dict | None) -> None:
-    data = load_memory()
-    st = data.get("state", {}) or {}
-    if action is None:
-        st.pop("pending_action", None)
-        st.pop("pending_risk", None)
-        st.pop("pending_note", None)
-    else:
-        st["pending_action"] = action
-    data["state"] = st
-    save_memory(data)
+    markers = ("agora", "depois", "em seguida", "também", "isso", "essa", "esse", "aí", "ai", "então", "entao", "repete", "novamente")
+    return any(m in s for m in markers)
 
 
-def set_pending_risk(level: str, note: str = "") -> None:
-    set_state({"pending_risk": level, "pending_note": note})
+# -------------------------
+# Session
+# -------------------------
+def get_session() -> dict[str, Any]:
+    return load_memory().get("session", {}) or {}
 
 
-def get_pending() -> tuple[dict | None, str, str]:
-    st = get_state()
-    a = st.get("pending_action")
-    risk = str(st.get("pending_risk") or "")
-    note = str(st.get("pending_note") or "")
-    if not isinstance(a, dict):
-        a = None
-    return a, risk, note
+def set_session_mode(mode: str) -> None:
+    mode = (mode or "").strip().lower()
+    if mode not in ("dry", "execute", "safe"):
+        return
+    mem = load_memory()
+    mem["session"] = mem.get("session", {}) or {}
+    mem["session"]["mode"] = mode
+    save_memory(mem)
+
+
+def set_session(patch: dict[str, Any]) -> None:
+    mem = load_memory()
+    sess = mem.get("session", {}) or {}
+    for k, v in (patch or {}).items():
+        if v is None:
+            continue
+        sess[k] = v
+    mem["session"] = sess
+    save_memory(mem)
+
+
+# -------------------------
+# Active plan (human readable)
+# -------------------------
+def set_goal(goal: str) -> None:
+    mem = load_memory()
+    ap = mem.get("active_plan", {}) or {}
+    ap["goal"] = (goal or "").strip()
+    mem["active_plan"] = ap
+    save_memory(mem)
+
+
+def set_active_plan(plan: list, goal: Optional[str] = None, idx: int = 0) -> None:
+    mem = load_memory()
+    mem["active_plan"] = {
+        "goal": (goal or mem.get("active_plan", {}).get("goal") or "").strip() or None,
+        "plan": plan or [],
+        "idx": int(idx or 0),
+    }
+    save_memory(mem)
+
+
+def get_active_plan() -> Tuple[list, int, Optional[str]]:
+    mem = load_memory()
+    ap = mem.get("active_plan", {}) or {}
+    return ap.get("plan", []) or [], int(ap.get("idx", 0) or 0), ap.get("goal")
+
+
+def advance_active_plan(step: int = 1) -> None:
+    mem = load_memory()
+    ap = mem.get("active_plan", {}) or {}
+    ap["idx"] = int(ap.get("idx", 0) or 0) + int(step or 1)
+    mem["active_plan"] = ap
+    save_memory(mem)
+
+
+def clear_active_plan() -> None:
+    mem = load_memory()
+    mem["active_plan"] = _default()["active_plan"]
+    save_memory(mem)
+
+
+def format_active_plan_status() -> str:
+    plan, idx, goal = get_active_plan()
+    if not plan:
+        return "Não há plano ativo no momento."
+
+    lines = []
+    if goal:
+        lines.append(f"Objetivo atual: {goal}")
+    lines.append(f"Progresso: {min(idx, len(plan))}/{len(plan)}")
+    lines.append("Próximos passos:")
+
+    for i, p in enumerate(plan):
+        step = p.get("step") or p.get("action") or ""
+        action = p.get("action") or ""
+        if i < idx:
+            prefix = "✅"
+        elif i == idx:
+            prefix = "➡️"
+        else:
+            prefix = "•"
+        lines.append(f"{prefix} [{i+1}] {step} ({action})")
+
+    return "\n".join(lines).strip()
+
+
+# -------------------------
+# Pending confirm
+# -------------------------
+def set_pending_action(action: Optional[dict]) -> None:
+    mem = load_memory()
+    mem["pending"] = mem.get("pending", {}) or {}
+    mem["pending"]["action"] = action
+    save_memory(mem)
+
+
+def set_pending_risk(risk: Optional[str], note: Optional[str]) -> None:
+    mem = load_memory()
+    mem["pending"] = mem.get("pending", {}) or {}
+    mem["pending"]["risk"] = risk
+    mem["pending"]["note"] = note
+    save_memory(mem)
+
+
+def get_pending() -> tuple[Optional[dict], Optional[str], Optional[str]]:
+    mem = load_memory()
+    p = mem.get("pending", {}) or {}
+    return p.get("action"), p.get("risk"), p.get("note")
+
+
+def clear_pending() -> None:
+    mem = load_memory()
+    mem["pending"] = _default()["pending"]
+    save_memory(mem)
+
+
+# -------------------------
+# Reset
+# -------------------------
+def clear_memory() -> None:
+    save_memory(_default())
