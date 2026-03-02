@@ -1,13 +1,13 @@
 model_list:
   - model_name: fast
     litellm_params:
-      model: gemini/gemini-3-flash-preview
-      api_key: os.environ/GEMINI_API_KEY
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: brain
     litellm_params:
-      model: gemini/gemini-3-flash-preview
-      api_key: os.environ/GEMINI_API_KEY
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: reasoning
     litellm_params:
@@ -16,6 +16,11 @@ model_list:
       thinking:
         type: enabled
         budget_tokens: 8000
+
+  # - model_name: fast
+  #   litellm_params:
+  #     model: gemini/gemini-3-flash-preview
+  #     api_key: os.environ/GEMINI_API_KEY
 
   # - model_name: brain
   #   litellm_params:
