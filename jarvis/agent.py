@@ -6,7 +6,8 @@ from .skills.registry import build_skills
 from .memory import (
     add_turn, build_context, clear_memory, should_inject_memory, set_state,
     set_active_plan, get_active_plan, advance_active_plan,
-    clear_active_plan, format_active_plan_status, set_goal
+    clear_active_plan, format_active_plan_status, set_goal,
+    set_pending_action, set_pending_risk, get_pending
 )
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
@@ -154,6 +155,85 @@ class JarvisAgent:
             return response
 
         # -----------------------------
+        # RISK GATE (local, no LLM)
+        # -----------------------------
+        def classify_action_risk(action: str, args: dict) -> tuple[str, str]:
+            """
+            return (risk_level, note)
+            risk_level in: safe|risky|danger
+            """
+            if action in ("open_app", "open_url"):
+                return "safe", ""
+
+            if action != "run_shell":
+                return "risky", "Ação não classificada."
+
+            cmd = (args.get("command") or "").strip()
+            c = cmd.lower()
+
+            safe_prefixes = (
+                "pwd", "ls", "whoami", "date",
+                "git status", "git diff", "git log", "git branch",
+                "python --version", "python3 --version",
+                "node -v", "npm -v", "yarn -v", "pnpm -v",
+            )
+            if any(c == p or c.startswith(p + " ") for p in safe_prefixes):
+                return "safe", ""
+
+            danger_patterns = [
+                "rm -rf", "rm -fr", "sudo ", "dd ", "mkfs", "diskutil erase",
+                "shutdown", "reboot", ":(){ :|:& };:",
+                "chmod -r", "chown -r",
+                ">/dev/sd", " /dev/sd",
+            ]
+            if any(p in c for p in danger_patterns):
+                return "danger", f"Comando potencialmente destrutivo: {cmd}"
+
+            risky_patterns = [
+                "git push", "git reset --hard", "git clean -fd", "git clean -xdf",
+                "docker system prune", "docker volume prune", "docker image prune",
+                "npm install", "pnpm install", "yarn install",
+                "npm run", "pnpm run", "yarn run",
+                "pip install", "pip3 install",
+                "composer install", "composer update",
+                "brew install", "brew upgrade",
+                "kill ", "pkill ",
+            ]
+            if any(p in c for p in risky_patterns):
+                return "risky", f"Comando com impacto: {cmd}"
+
+            return "risky", f"Confirmar execução: {cmd}"
+
+        def guarded_execute(action: str, args: dict) -> tuple[bool, str]:
+            """
+            Returns (executed, output_or_prompt)
+            """
+            risk, note = classify_action_risk(action, args)
+
+            if risk == "safe":
+                learn_state_from_action(action, args)
+                return True, self.SKILLS[action].run(args)
+
+            # salva pendência
+            set_pending_action({"action": action, **args})
+            set_pending_risk(risk, note)
+
+            if risk == "danger":
+                return False, (
+                    "⚠️ AÇÃO PERIGOSA detectada.\n"
+                    f"{note}\n\n"
+                    "Para confirmar, digite exatamente: YES I KNOW\n"
+                    "Para cancelar: jarvis no"
+                )
+
+            return False, (
+                "⚠️ Confirmação necessária.\n"
+                f"{note}\n\n"
+                "Para confirmar: jarvis yes\n"
+                "Para cancelar: jarvis no"
+            )
+
+        # -----------------------------
         # Forced routing via prefix
         # -----------------------------
         forced = None
@@ -181,6 +261,48 @@ class JarvisAgent:
         # -----------------------------
         cmd = (user_input or "").strip().lower()
 
+        # confirmar/recusar pendência
+        if cmd in ("yes", "y", "confirmar"):
+            pending, risk, note = get_pending()
+            if not pending:
+                return remember("Não há nenhuma ação pendente para confirmar.")
+
+            if risk == "danger":
+                return remember("Esta ação é PERIGOSA. Para confirmar, digite exatamente: YES I KNOW")
+
+            action = pending.get("action")
+            args = {k: v for k, v in pending.items() if k != "action"}
+            set_pending_action(None)
+
+            if action in self.SKILLS:
+                ok, out = guarded_execute(action, args)
+                return remember(out)
+            return remember("Ação pendente inválida.")
+
+        if cmd.replace('"', "").strip().lower() == "yes i know":
+            pending, risk, note = get_pending()
+            if not pending:
+                return remember("Não há nenhuma ação pendente para confirmar.")
+
+            action = pending.get("action")
+            args = {k: v for k, v in pending.items() if k != "action"}
+            set_pending_action(None)
+
+            if action in self.SKILLS:
+                # executa mesmo sendo danger
+                learn_state_from_action(action, args)
+                out = self.SKILLS[action].run(args)
+                return remember(out)
+
+            return remember("Ação pendente inválida.")
+
+        if cmd in ("no", "n", "cancelar isso", "cancel"):
+            pending, risk, note = get_pending()
+            if not pending:
+                return remember("Ok.")
+            set_pending_action(None)
+            return remember("Cancelado.")
+
         # limpar memória
         if cmd in ("limpar memoria", "limpar memória", "clear memory", "reset memory"):
             clear_memory()
@@ -207,7 +329,7 @@ class JarvisAgent:
                 lines.append(f"{mark} {i+1}. {step}")
             return remember("\n".join(lines))
 
-        # continuar (aceita continue)
+        # continuar (aceita continue) - step-by-step + risk gate
         if cmd in ("continua", "continuar", "seguir", "next", "continue"):
             plan, idx = get_active_plan()
             if not plan:
@@ -230,8 +352,12 @@ class JarvisAgent:
 
             if action in self.SKILLS:
                 args = {k: v for k, v in item.items() if k not in ("action", "step")}
-                learn_state_from_action(action, args)
-                out = self.SKILLS[action].run(args)
+                executed, out = guarded_execute(action, args)
+
+                if not executed:
+                    # não avança índice, aguarda confirmação
+                    return remember(out)
+
                 advance_active_plan(1)
 
                 plan2, idx2 = get_active_plan()
@@ -243,7 +369,7 @@ class JarvisAgent:
             advance_active_plan(1)
             return remember(f"Ação desconhecida no plano: {action}. Diga 'continua' para pular.")
 
-        # executar tudo (sem LLM)
+        # executar tudo (sem LLM) + risk gate
         if cmd in (
             "executar tudo", "executar todas", "executar plano",
             "run all", "execute all", "executar todas as etapas"
@@ -272,8 +398,13 @@ class JarvisAgent:
 
                 if action in self.SKILLS:
                     args = {k: v for k, v in item.items() if k not in ("action", "step")}
-                    learn_state_from_action(action, args)
-                    results.append(self.SKILLS[action].run(args))
+                    executed, out = guarded_execute(action, args)
+
+                    if not executed:
+                        # pausa e espera confirmação
+                        return remember(out)
+
+                    results.append(out)
                     advance_active_plan(1)
                     idx += 1
                     continue
@@ -327,7 +458,7 @@ class JarvisAgent:
         # FORCED PLAN MODE: plan:/think:/reason:
         # - normaliza actions -> plan
         # - salva plano
-        # - executa só 1º passo
+        # - executa só 1º passo (step-by-step) + risk gate
         # -----------------------------
         if forced == "reasoning":
             if "plan" not in d and "actions" in d and isinstance(d["actions"], list):
@@ -360,15 +491,18 @@ class JarvisAgent:
 
                 if action in self.SKILLS:
                     args = {k: v for k, v in first.items() if k not in ("action", "step")}
-                    learn_state_from_action(action, args)
-                    out = self.SKILLS[action].run(args)
+                    executed, out = guarded_execute(action, args)
+
+                    if not executed:
+                        return remember(out)
+
                     advance_active_plan(1)
                     return remember(out + "\n\n➡️ Diga 'continua' para o próximo passo.")
 
                 advance_active_plan(1)
                 return remember(f"Ação desconhecida no plano: {action}. Diga 'continua' para pular.")
 
-        # Plan mode normal (caso LLM devolva plan explicitamente)
+        # Plan mode normal (caso LLM devolva plan explicitamente) - step-by-step + risk gate
         if "plan" in d and isinstance(d["plan"], list):
             plan = d["plan"]
 
@@ -393,23 +527,28 @@ class JarvisAgent:
 
             if action in self.SKILLS:
                 args = {k: v for k, v in first.items() if k not in ("action", "step")}
-                learn_state_from_action(action, args)
-                out = self.SKILLS[action].run(args)
+                executed, out = guarded_execute(action, args)
+
+                if not executed:
+                    return remember(out)
+
                 advance_active_plan(1)
                 return remember(out + "\n\n➡️ Diga 'continua' para o próximo passo.")
 
             advance_active_plan(1)
             return remember(f"Ação desconhecida no plano: {action}. Diga 'continua' para pular.")
 
-        # Multi actions (normal)
+        # Multi actions (normal) - aqui mantém como antes (executa tudo) + risk gate por ação
         if "actions" in d and isinstance(d["actions"], list):
             results = []
             for step in d["actions"]:
                 action = step.get("action")
                 if action in self.SKILLS:
                     args = {k: v for k, v in step.items() if k != "action"}
-                    learn_state_from_action(action, args)
-                    results.append(self.SKILLS[action].run(args))
+                    executed, out = guarded_execute(action, args)
+                    if not executed:
+                        return remember(out)
+                    results.append(out)
                 else:
                     results.append(f"Ação desconhecida: {action}")
             return remember("\n".join(results))
@@ -422,7 +561,7 @@ class JarvisAgent:
 
         if action in self.SKILLS:
             args = {k: v for k, v in d.items() if k != "action"}
-            learn_state_from_action(action, args)
-            return remember(self.SKILLS[action].run(args))
+            executed, out = guarded_execute(action, args)
+            return remember(out)
 
         return remember("Não entendi como executar isso ainda.")

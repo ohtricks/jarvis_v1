@@ -226,3 +226,30 @@ def should_inject_memory(user_input: str) -> bool:
         return True
 
     return any(m in s for m in followup_markers)
+
+
+def set_pending_action(action: dict | None) -> None:
+    data = load_memory()
+    st = data.get("state", {}) or {}
+    if action is None:
+        st.pop("pending_action", None)
+        st.pop("pending_risk", None)
+        st.pop("pending_note", None)
+    else:
+        st["pending_action"] = action
+    data["state"] = st
+    save_memory(data)
+
+
+def set_pending_risk(level: str, note: str = "") -> None:
+    set_state({"pending_risk": level, "pending_note": note})
+
+
+def get_pending() -> tuple[dict | None, str, str]:
+    st = get_state()
+    a = st.get("pending_action")
+    risk = str(st.get("pending_risk") or "")
+    note = str(st.get("pending_note") or "")
+    if not isinstance(a, dict):
+        a = None
+    return a, risk, note
