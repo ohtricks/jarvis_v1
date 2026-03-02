@@ -1,20 +1,43 @@
 from .memory import (
     clear_memory, format_active_plan_status, clear_active_plan,
-    set_session_mode, get_session, set_session,
+    set_session_mode, get_session,
 )
 from .queue import (
-    format_queue_status, clear_queue, has_active_queue, list_items
+    format_queue_status, clear_queue, has_active_queue, list_items,
+    mark_done, mark_skipped
 )
 from .risk import handle_confirmation
 from .executor import execute_next, execute_all_until_blocked
+from .memory import get_pending  # <- vem do memory.py no seu projeto
 
 def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
     raw = (cmd or "").strip()
     c = raw.lower()
 
-    # confirmations
-    if c in ("yes", "y", "no", "n", "confirmar", "cancel", "cancelar") or raw.replace('"', '').strip().upper() == "YES I KNOW":
+    # confirmations (NO LLM)
+    is_yes = c in ("yes", "y", "confirmar")
+    is_no = c in ("no", "n", "cancel", "cancelar")
+    is_yes_i_know = raw.replace('"', '').strip().upper() == "YES I KNOW"
+    if is_yes or is_no or is_yes_i_know:
+        pending, risk, note = get_pending()
         out = handle_confirmation(raw, skills, learn_state_fn)
+
+        # se havia pending e ele estava ligado a um item da queue, atualiza status
+        if pending and isinstance(pending, dict) and "_queue_idx" in pending:
+            qidx = pending.get("_queue_idx")
+            try:
+                qidx = int(qidx)
+            except Exception:
+                qidx = None
+
+            if qidx is not None:
+                if is_no:
+                    mark_skipped(qidx, "Cancelado pelo usuário.")
+                else:
+                    # yes / YES I KNOW -> marca done com o output
+                    if out is not None:
+                        mark_done(qidx, out)
+
         if out is not None:
             return out
 
@@ -38,7 +61,6 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
 
     # status
     if c in ("status", "status plano", "plano status"):
-        # prefer queue status if exists
         if has_active_queue():
             return format_queue_status()
         return format_active_plan_status()
@@ -62,6 +84,8 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
                 prefix = "⏳"
             elif st == "failed":
                 prefix = "❌"
+            elif st == "skipped":
+                prefix = "⏭️"
             else:
                 prefix = "•"
             lines.append(f"{prefix} {i+1}. {step}")

@@ -85,6 +85,14 @@ def next_pending() -> Tuple[Optional[dict], int]:
     return None, -1
 
 
+def first_blocked() -> Tuple[Optional[dict], int]:
+    items = list_items()
+    for idx, it in enumerate(items):
+        if it.get("status") == "blocked":
+            return it, idx
+    return None, -1
+
+
 def set_item(idx: int, patch: dict) -> None:
     q = load_queue()
     items = q.get("items", []) or []
@@ -104,6 +112,10 @@ def mark_done(idx: int, result: str) -> None:
 
 def mark_failed(idx: int, error: str) -> None:
     set_item(idx, {"status": "failed", "error": error})
+
+
+def mark_skipped(idx: int, note: str = "Cancelado.") -> None:
+    set_item(idx, {"status": "skipped", "error": note})
 
 
 def mark_blocked(idx: int, risk: str, note: str) -> None:
@@ -127,7 +139,7 @@ def format_queue_status() -> str:
     if not items:
         return "Não há fila ativa."
 
-    done = sum(1 for i in items if i.get("status") == "done")
+    done = sum(1 for i in items if i.get("status") in ("done", "skipped"))
     total = len(items)
 
     lines = []
@@ -149,6 +161,8 @@ def format_queue_status() -> str:
             prefix = "⏳"
         elif st == "failed":
             prefix = "❌"
+        elif st == "skipped":
+            prefix = "⏭️"
         else:
             prefix = "•"
         lines.append(f"{prefix} [{i+1}] {step} ({it.get('action')})")

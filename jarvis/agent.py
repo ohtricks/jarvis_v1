@@ -4,7 +4,7 @@ from .memory import add_turn, set_state, set_session
 from .commands import handle_builtin
 from .router import route_input, strip_forced_prefix
 from .planner import make_plan
-from .queue import enqueue_plan, clear_queue, has_active_queue
+from .queue import enqueue_plan, clear_queue
 from .executor import execute_next
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
@@ -13,7 +13,6 @@ DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 class JarvisAgent:
     def __init__(self, execute: bool = False):
         self.SKILLS = build_skills(execute=execute)
-        # session hint: se o user chamar com --execute, guarda cwd atual e mode execute (opcional)
         if execute:
             set_session({"mode": "execute"})
 
@@ -80,17 +79,14 @@ class JarvisAgent:
             clear_queue()
             enqueue_plan(goal, plan)
 
-            # execute first step automatically
             first_out = execute_next(self.SKILLS, self._learn_state_from_action)
             return remember(first_out + "\n\n➡️ Diga 'continue' para o próximo passo, ou 'executar tudo'.")
 
-        # executor route => single-step queue (no planner)
+        # executor route => single-step queue
         if r["route"] == "executor":
-            # cria plano trivial via planner? não. tenta "smart": se o usuário escreveu algo tipo "abra X" ou "rode Y",
-            # aqui a V2 limpa usa planner para 1 step? (evita) -> por simplicidade, transforma em mini-plan via planner.
-            plan_data = make_plan(text)  # usa reasoning, mas reduz erro. Se quiser baratear, eu troco por EXECUTOR_PROMPT + brain.
+            plan_data = make_plan(text)
             goal = plan_data["goal"]
-            plan = plan_data["plan"][:1]  # só 1 passo
+            plan = plan_data["plan"][:1]
 
             clear_queue()
             enqueue_plan(goal, plan)
