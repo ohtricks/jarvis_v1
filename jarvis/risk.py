@@ -1,5 +1,11 @@
-from .memory import set_pending_action, set_pending_risk, get_pending, clear_pending
-from .queue import mark_blocked, mark_done
+# jarvis/risk.py
+from .memory import (
+    set_pending_action,
+    set_pending_risk,
+    get_pending,
+    clear_pending,
+    get_session,  # ✅ novo
+)
 from typing import Tuple, Optional
 
 
@@ -71,7 +77,7 @@ def require_confirmation(action: str, args: dict, skills: dict, desired_execute:
     if risk == "safe":
         return False, "safe", ""
 
-    # salva pendência com o execute desejado
+    # salva pendência com o execute desejado (no momento do pedido)
     set_pending_action({"action": action, **args, "_execute": bool(desired_execute)})
     set_pending_risk(risk, note)
     return True, risk, note
@@ -87,7 +93,16 @@ def _execute_pending(pending: dict, skills: dict, learn_state_fn) -> str:
     if not skill:
         return "Ação pendente inválida."
 
+    # ✅ regra nova:
+    # Se a pendência foi criada em dry (_execute=false), mas o usuário está em mode execute,
+    # então executar de verdade na confirmação.
+    sess = get_session() or {}
+    session_mode = (sess.get("mode") or "dry").lower()
+
     pending_execute = bool(pending.get("_execute", False))
+    if not pending_execute and session_mode == "execute":
+        pending_execute = True
+
     old_execute = getattr(skill, "execute", None)
     try:
         if old_execute is not None:

@@ -1,30 +1,34 @@
+# jarvis/main.py
 import sys
 from .agent import JarvisAgent
+
 
 def main():
     args = sys.argv[1:]
 
     execute = False
 
-    # compat antigo: --yes/-y
-    if "--yes" in args or "-y" in args:
+    # aliases
+    if "--execute" in args or "-x" in args or "--yes" in args or "-y" in args:
         execute = True
-        args = [a for a in args if a not in ("--yes", "-y")]
+        args = [a for a in args if a not in ("--execute", "-x", "--yes", "-y")]
 
-    # novo: --execute
-    if "--execute" in args:
-        execute = True
-        args = [a for a in args if a != "--execute"]
+    # força dry mesmo se tiver session mode execute
+    if "--dry" in args or "--dry-run" in args:
+        execute = False
+        args = [a for a in args if a not in ("--dry", "--dry-run")]
 
     user_input = " ".join(args).strip()
+
     if not user_input:
-        print("Usage: jarvis [--execute|--yes|-y] \"your command\"")
+        print('Usage: jarvis [--execute|-x|--yes|-y|--dry] "your command"')
         return
 
     agent = JarvisAgent(execute=execute)
     response = agent.run(user_input)
 
     print(f"\nJarvis: {response}\n")
+
 
 if __name__ == "__main__":
     main()
