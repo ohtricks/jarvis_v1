@@ -8,8 +8,9 @@ Formato:
 
 Regras:
 - Se for resposta curta e simples, sem tools: route="fast_reply", needs_actions=false, e inclua "response" (pt-BR).
-- Se o usuário pedir múltiplas etapas / "plan:" / preparar ambiente: route="planner", needs_actions=true.
-- Se for uma única ação (abrir app, abrir url, rodar comando): route="executor", needs_actions=true.
+- Se o usuário pedir 2 ou mais ações juntas (ex: "abra X e acesse Y", "abra A, B e C", "faça X e depois Y"): route="planner", needs_actions=true.
+- Se o usuário pedir múltiplas etapas sequenciais, "plan:" ou preparar um ambiente: route="planner", needs_actions=true.
+- Se for uma única ação isolada (abrir um app, abrir uma url, rodar um comando): route="executor", needs_actions=true.
 """
 
 PLANNER_PROMPT = """

@@ -1,3 +1,5 @@
+import os
+import time
 from typing import Tuple
 
 from .queue import (
@@ -9,6 +11,9 @@ from .queue import (
 )
 from .risk import require_confirmation, confirm_message
 from .memory import get_session
+from .telemetry import debug_append
+
+DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
 
 def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
@@ -26,6 +31,7 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
 
     action = it.get("action")
     args = it.get("args", {}) or {}
+    step_label = it.get("step", action)
 
     sess = get_session()
     mode = (sess.get("mode") or "dry").lower()
@@ -38,7 +44,11 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
 
     if action not in skills:
         mark_failed(idx, f"Ação desconhecida: {action}")
+        if DEBUG:
+            debug_append("execution", {"step": step_label, "action": action, "risk": "unknown", "status": "failed", "output": f"Ação desconhecida: {action}", "ms": 0})
         return f"Ação desconhecida: {action}", "failed"
+
+    t0 = time.time()
 
     # Risk gate (V3): se bloquear, grava confirm no item bloqueado
     blocked, risk, note, confirm = require_confirmation(
@@ -48,6 +58,8 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
     )
     if blocked:
         mark_blocked(idx, risk, note, confirm=confirm)
+        if DEBUG:
+            debug_append("execution", {"step": step_label, "action": action, "risk": risk, "status": "blocked", "output": note, "ms": int((time.time() - t0) * 1000)})
         return confirm_message(risk, note), "blocked"
 
     # Execução real (única fonte de execução)
@@ -68,10 +80,14 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
                 skill.execute = old_execute
 
         mark_done(idx, out)
+        if DEBUG:
+            debug_append("execution", {"step": step_label, "action": action, "risk": risk, "status": "done", "output": out, "ms": int((time.time() - t0) * 1000)})
         return out, "done"
 
     except Exception as e:
         mark_failed(idx, str(e))
+        if DEBUG:
+            debug_append("execution", {"step": step_label, "action": action, "risk": risk, "status": "failed", "output": str(e), "ms": int((time.time() - t0) * 1000)})
         return f"Erro ao executar ação: {e}", "failed"
 
 

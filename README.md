@@ -8,19 +8,22 @@ Assistente pessoal de IA alimentado por múltiplos modelos LLM via LiteLLM proxy
 User Input
      │
      ▼
-[Prefix Check] ──── força modelo (reason:, plan:, fast:, brain:)
+[Prefix Check] ──── força rota (plan:/think:/reason: | exec:/brain: | fast:)
      │
      ▼
-[Built-in Commands] ── memory, plans, confirmações (sem LLM)
+[Built-in Commands] ── confirmações, memory, mode, queue, status (sem LLM)
      │
      ▼
-[Router] ──────────── fast_reply | brain | reasoning
+[Router LLM] ──────── fast_reply | executor | planner
      │
      ▼
-[LLM] ─────────────── chat | action | plan
+[LLM] ─────────────── fast_reply | exec single-step | plan multi-step
      │
      ▼
-[Risk Gate] ──────── safe → executa
+[Queue] ──────────── persiste etapas em ~/.jarvis/queue.json
+     │
+     ▼
+[Risk Gate] ──────── safe → executa automaticamente
                      risky → pede "jarvis yes"
                      danger → pede "YES I KNOW"
      │
@@ -30,6 +33,138 @@ User Input
      ▼
 [Memory] ─────────── salva estado + histórico (~/.jarvis/memory.json)
 ```
+
+## Como executar
+
+### Pré-requisitos
+
+- Python 3.10+
+- macOS (skills `open_app` e `open_url` usam o comando `open`)
+- Anthropic API key
+
+### Instalação
+
+```bash
+# 1. Clone o repositório
+git clone git@github.com:ohtricks/jarvis_v1.git
+cd jarvis_v1
+
+# 2. Crie e ative um ambiente virtual
+python -m venv .venv
+source .venv/bin/activate
+
+# 3. Instale as dependências e o comando jarvis
+pip install litellm
+pip install -e .
+
+# 4. Configure as variáveis de ambiente
+cp .env.example .env
+# Edite .env e adicione sua ANTHROPIC_API_KEY
+```
+
+`.env`:
+```env
+ANTHROPIC_API_KEY=your_anthropic_api_key
+# GEMINI_API_KEY=your_gemini_api_key  # se usar modelos Gemini
+```
+
+### Executando
+
+Abra dois terminais:
+
+```bash
+# Terminal 1 — inicie o proxy LiteLLM
+litellm --config config.yaml
+
+# Terminal 2 — use o Jarvis
+jarvis "abra o Safari"
+jarvis -x "liste os arquivos do diretório atual"   # -x executa de verdade
+```
+
+### Flags da CLI
+
+| Flag | Comportamento |
+|------|--------------|
+| (nenhuma) | Modo dry-run: descreve o que faria, sem executar |
+| `--execute` / `-x` / `--yes` / `-y` | Modo execute: executa skills de verdade |
+| `--dry` / `--dry-run` | Força dry-run explicitamente |
+
+### Testando a conexão
+
+```bash
+python test.py
+```
+
+---
+
+## Uso
+
+```bash
+# Abrir um app
+jarvis "abra o Safari"
+
+# Abrir múltiplos apps de uma vez
+jarvis "abra o VSCode e o Slack"
+
+# Abrir uma URL
+jarvis "abra github.com"
+
+# Executar comando shell (modo execute ativo)
+jarvis -x "liste os arquivos do diretório atual"
+
+# Plano multi-step
+jarvis "plan: crie uma pasta projeto e inicialize um repositório git"
+
+# Forçar rota específica
+jarvis "reason: analise os trade-offs de usar Redis vs Memcached"
+jarvis "fast: qual a capital da França?"
+jarvis "exec: abra o Chrome"
+
+# Conversa
+jarvis "o que você pode fazer?"
+```
+
+### Prefixos de força de rota
+
+| Prefixo | Rota | Comportamento |
+|---------|------|---------------|
+| `reason:` / `think:` / `plan:` | planner | Planejamento multi-step, executa até encontrar bloqueio |
+| `exec:` / `brain:` | executor | Execução single-step |
+| `fast:` | fast_reply | Resposta rápida, sem executar actions |
+
+### Modos de execução
+
+| Modo | Comportamento |
+|------|--------------|
+| `dry` | Nunca executa skills — apenas descreve (padrão ao omitir flag) |
+| `execute` | Executa tudo, incluindo ações risky/danger após confirmação |
+| `safe` | Executa `safe` automaticamente; pede confirmação para `risky`/`danger` |
+
+Mudar modo via comando (persiste na sessão):
+```bash
+jarvis "mode execute"
+jarvis "mode dry"
+jarvis "mode safe"
+jarvis "mode"           # mostra o modo atual
+```
+
+### Comandos built-in (sem LLM)
+
+| Comando | Ação |
+|---------|------|
+| `status` / `status plano` | Mostra o plano ativo e progresso da fila |
+| `listar plano` / `etapas` / `queue` / `fila` | Lista todos os passos com status |
+| `continua` / `continue` / `continuar` / `next` / `seguir` | Retoma execução do próximo passo |
+| `executar tudo` / `executar todas` / `run all` / `execute all` | Executa todos os passos restantes |
+| `executar proximo` / `run next` | Executa apenas o próximo passo |
+| `cancelar` / `cancelar plano` / `parar` / `stop` | Cancela o plano ativo |
+| `yes` / `y` / `confirmar` | Confirma ação risky pendente |
+| `no` / `n` / `cancel` / `cancelar` | Cancela ação pendente |
+| `YES I KNOW` | Confirma ação danger pendente |
+| `mode dry\|execute\|safe` | Muda modo de execução |
+| `limpar memória` / `clear memory` / `reset memory` | Limpa todo o estado e histórico |
+
+---
 
 ## Skills disponíveis
 
@@ -54,57 +189,11 @@ User Input
 
 ### run_shell — comandos permitidos
 
-Prefixos na allowlist: `ls`, `pwd`, `whoami`, `git`, `python`, `pip`, `node`, `npm`, `docker`, `php`, `composer`, `cat`, `echo`, `mkdir`, `touch`, `code`.
+Prefixos na allowlist: `ls`, `pwd`, `whoami`, `git`, `python`, `pip`, `node`, `npm`, `pnpm`, `yarn`, `docker`, `docker-compose`, `php`, `composer`, `cat`, `echo`, `mkdir`, `touch`, `code`.
 
 Comandos com `rm`, `sudo`, `shutdown`, `mkfs`, `dd`, `killall` são bloqueados ou exigem confirmação.
 
-## Uso
-
-Com o proxy LiteLLM rodando, use o comando `jarvis`:
-
-```bash
-# Abrir um app
-jarvis "abra o Safari"
-
-# Abrir múltiplos apps de uma vez
-jarvis "abra o VSCode e o Slack"
-
-# Abrir uma URL
-jarvis "abra github.com"
-
-# Executar comando shell
-jarvis "liste os arquivos do diretório atual"
-
-# Plano multi-step
-jarvis "plan: crie uma pasta projeto e inicialize um repositório git"
-
-# Forçar modelo específico
-jarvis "reason: analise os trade-offs de usar Redis vs Memcached"
-jarvis "fast: qual a capital da França?"
-
-# Conversa
-jarvis "o que você pode fazer?"
-```
-
-### Prefixos de força de modelo
-
-| Prefixo | Modelo usado |
-|---------|--------------|
-| `reason:` / `think:` | reasoning (pensamento estendido) |
-| `plan:` | reasoning (planejamento multi-step) |
-| `brain:` | brain (uso de ferramentas) |
-| `fast:` | fast (resposta rápida) |
-
-### Comandos built-in (sem LLM)
-
-| Comando | Ação |
-|---------|------|
-| `status` / `status plano` | Mostra o plano ativo e progresso |
-| `continua` / `continue` | Retoma execução do plano |
-| `executar tudo` | Executa todos os passos restantes do plano |
-| `cancelar` / `parar` | Cancela o plano ativo |
-| `listar plano` | Lista todos os passos com progresso |
-| `limpar memória` / `clear memory` | Limpa todo o estado e histórico |
+---
 
 ## Risk Gate
 
@@ -118,23 +207,44 @@ Antes de executar comandos shell, o Jarvis classifica o risco:
 
 ```bash
 # Exemplo: comando risky
-jarvis "faça push das mudanças"
-# → ⚠️ Ação risky: git push origin main
+jarvis -x "faça push das mudanças"
+# → ⚠️ Confirmação necessária: git push origin main
 # → Para confirmar: jarvis yes | Para cancelar: jarvis no
 
 jarvis "yes"
 # → Executando...
 ```
 
+Após a confirmação, a execução retoma automaticamente até o próximo bloqueio ou o fim do plano.
+
+---
+
 ## Memória
 
-O Jarvis mantém estado persistente em `~/.jarvis/memory.json`:
+O Jarvis mantém estado persistente em `~/.jarvis/`:
 
-- **Histórico de conversa**: últimas 6 trocas (máx. 500 chars cada)
-- **Estado de sessão**: último app aberto, browser atual, última URL, último comando shell, diretório atual
-- **Plano ativo**: passo atual, progresso, ação pendente de confirmação
+| Arquivo | Conteúdo |
+|---------|----------|
+| `memory.json` | Histórico de conversa (8 turns) + estado de sessão |
+| `queue.json` | Fila de tarefas do plano ativo (V3) |
+| `logs/` | Eventos de telemetria e uso de tokens |
 
-A memória é injetada automaticamente em inputs curtos ou que contêm palavras de continuação ("agora", "também", "de novo", "continua", etc.).
+**Estado rastreado automaticamente:**
+- Último app aberto, browser atual, última URL, último comando shell, diretório atual
+
+**Injeção de contexto:** A memória é injetada automaticamente quando o input é curto (≤ 50 chars) ou contém palavras de continuação como "agora", "também", "isso", "então", "de novo", "continua", etc.
+
+---
+
+## Debug
+
+```bash
+JARVIS_DEBUG=1 jarvis "abra o Chrome"
+```
+
+Exibe: classificação do router, output do planner, decisões do executor, uso de tokens.
+
+---
 
 ## Estrutura do projeto
 
@@ -145,15 +255,20 @@ jarvis_v1/
 ├── .env.example         # Template de variáveis de ambiente
 ├── test.py              # Teste de conexão com o LLM
 └── jarvis/
-    ├── main.py          # Entry point da CLI (flags --execute / --yes)
+    ├── main.py          # Entry point da CLI (flags --execute / --yes / --dry)
     ├── agent.py         # Orquestrador principal (decisão + execução)
-    ├── brain.py         # Interface com o LLM via LiteLLM proxy
-    ├── router.py        # Classifica input: fast_reply | brain | reasoning
-    ├── planner.py       # Planejamento multi-step e risk gate
+    ├── llm.py           # Interface com o LLM via LiteLLM proxy
+    ├── router.py        # Classifica input: fast_reply | executor | planner
+    ├── planner.py       # Planejamento multi-step
+    ├── executor.py      # Engine de execução single-step (V3)
+    ├── queue.py         # Gerenciamento da fila de tarefas
+    ├── risk.py          # Classificação de risco (safe / risky / danger)
     ├── commands.py      # Comandos built-in (sem LLM)
     ├── memory.py        # Persistência de estado e histórico
     ├── prompts.py       # System prompts do router e executor
+    ├── telemetry.py     # Logging de tokens e eventos
     ├── utils.py         # Utilitários (parse JSON, clean markdown)
+    ├── brain.py         # (legado) interface antiga com LLM
     └── skills/
         ├── base.py      # Classe base para skills
         ├── registry.py  # Factory de skills
@@ -162,69 +277,36 @@ jarvis_v1/
         └── run_shell.py # Skill: executar comandos shell (com allowlist)
 ```
 
+---
+
 ## Models
 
-| Role | Modelo padrão | Alternativas (config.yaml) |
-|------|--------------|---------------------------|
-| `fast` | Claude Haiku 4.5 | Gemini 2.5 Flash |
-| `brain` | Claude Haiku 4.5 | Claude Sonnet 4.6 |
-| `reasoning` | Claude Haiku 4.5 (extended thinking) | Claude Opus 4.6 |
+| Role | Modelo padrão | Uso |
+|------|--------------|-----|
+| `fast` | Claude Haiku 4.5 | Router + respostas rápidas |
+| `brain` | Claude Sonnet 4.6 | Execução single-step |
+| `reasoning` | Claude Sonnet 4.6 (extended thinking, 8k tokens) | Planejamento multi-step |
 
 Os modelos são definidos em [config.yaml](config.yaml) e podem ser trocados a qualquer momento.
 
-## Requirements
-
-- Python 3.10+
-- macOS (a skill `open_app` e `open_url` usam o comando `open`)
-- LiteLLM (como proxy local)
-- Anthropic API key (e/ou Gemini API key, dependendo dos modelos escolhidos)
-
-## Setup
-
-1. Clone o repositório:
-   ```bash
-   git clone git@github.com:ohtricks/jarvis_v1.git
-   cd jarvis_v1
-   ```
-
-2. Crie e ative um ambiente virtual:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   ```
-
-3. Instale as dependências e o comando `jarvis`:
-   ```bash
-   pip install litellm
-   pip install -e .
-   ```
-
-4. Configure as variáveis de ambiente:
-   ```bash
-   cp .env.example .env
-   ```
-
-   `.env`:
-   ```env
-   ANTHROPIC_API_KEY=your_anthropic_api_key
-   # GEMINI_API_KEY=your_gemini_api_key  # se usar modelos Gemini
-   ```
-
-5. Inicie o proxy LiteLLM:
-   ```bash
-   litellm --config config.yaml
-   ```
-
-6. Use o Jarvis:
-   ```bash
-   jarvis "abra o Safari"
-   ```
+---
 
 ## Configuration
 
 Os modelos são definidos em [config.yaml](config.yaml). Cada entrada mapeia um nome lógico (`fast`, `brain`, `reasoning`) a um modelo do provider, lendo a API key das variáveis de ambiente.
 
 O router usa sempre o modelo `fast` (temperatura 0) para classificar o input antes de despachar ao modelo correto.
+
+**Variáveis de ambiente opcionais:**
+
+| Variável | Padrão | Descrição |
+|----------|--------|-----------|
+| `ANTHROPIC_API_KEY` | — | API key da Anthropic (obrigatória) |
+| `OPENAI_API_BASE` | `http://localhost:4000` | Endpoint do proxy LiteLLM |
+| `OPENAI_API_KEY` | `sk-local` | API key para o proxy |
+| `JARVIS_DEBUG` | — | `1` para logs detalhados |
+
+---
 
 ## Criando novas skills
 
@@ -240,7 +322,8 @@ class MinhaSkill(Skill):
         self.execute = execute
 
     def run(self, args: dict) -> str:
-        if not self.execute:
+        # _execute: True é injetado pelo risk gate após confirmação do usuário
+        if not self.execute and not args.get("_execute"):
             return f"(dry-run) Eu executaria: {args}"
         # implemente a lógica aqui
         return "feito."
@@ -261,4 +344,3 @@ def get_skills(execute: bool = True) -> dict:
 ```
 
 3. O `Agent` já sabe acionar a skill quando o LLM retornar `{"action": "minha_skill", ...}`.
-

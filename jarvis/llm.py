@@ -1,6 +1,7 @@
 import os
+import time
 from openai import OpenAI
-from .telemetry import log_event, add_token_usage
+from .telemetry import log_event, add_token_usage, debug_append
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
@@ -14,7 +15,8 @@ def ask_llm(
     messages: list[dict],
     model: str,
     temperature: float = 0.0,
-    max_tokens: int | None = None
+    max_tokens: int | None = None,
+    role: str = "llm",
 ) -> str:
 
     # 🔥 FIX CRÍTICO
@@ -28,12 +30,14 @@ def ask_llm(
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
+    t0 = time.time()
     res = client.chat.completions.create(
         model=model,
         messages=messages,
         temperature=temperature,
         **kwargs
     )
+    elapsed_ms = int((time.time() - t0) * 1000)
 
     text = (res.choices[0].message.content or "").strip()
 
@@ -48,7 +52,7 @@ def ask_llm(
         if DEBUG:
             print(
                 f"DEBUG USAGE({model}): "
-                f"prompt={prompt} completion={completion} total={total}"
+                f"prompt={prompt} completion={completion} total={total} ms={elapsed_ms}"
             )
             log_event(
                 "token_usage",
@@ -59,5 +63,13 @@ def ask_llm(
                     "total": total,
                 },
             )
+            debug_append("llm_calls", {
+                "role": role,
+                "model": model,
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "total_tokens": total,
+                "ms": elapsed_ms,
+            })
 
     return text
