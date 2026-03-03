@@ -261,3 +261,4 @@ def get_skills(execute: bool = True) -> dict:
 ```
 
 3. O `Agent` já sabe acionar a skill quando o LLM retornar `{"action": "minha_skill", ...}`.
+
