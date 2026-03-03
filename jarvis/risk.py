@@ -100,25 +100,27 @@ def require_confirmation(
     desired_execute: bool,
 ) -> Tuple[bool, str, str, Optional[dict]]:
     """
-    V3: Risk gate NÃO executa e NÃO cria pendência fora da queue.
-    Retorna: (blocked, risk, note, confirm_payload)
+    V3 FIX:
+    - Se args['_execute'] == True, significa "já confirmado": NÃO bloqueia novamente.
+    - desired_execute continua existindo só para o executor decidir se executa de verdade
+      (mode dry/execute/safe). Não deve afetar o bypass da confirmação.
     """
+    # ✅ bypass após confirmação
+    if bool(args.get("_execute")) is True:
+        return False, "safe", "", None
+
     risk, note = classify_action_risk(action, args)
 
     if risk == "safe":
         return False, "safe", "", None
 
-    # O "payload" de confirmação fica salvo no item bloqueado da queue.
-    if risk == "danger":
-        required = "YES I KNOW"
-    else:
-        required = "yes"
+    required = "YES I KNOW" if risk == "danger" else "yes"
 
     confirm = {
         "kind": "risk_confirm",
         "required": required,
-        # quando confirmar, injeta _execute no args do item antes de retomar
-        "execute_payload": {"_execute": bool(desired_execute)},
+        # ✅ confirmação sempre injeta bypass, independente do mode
+        "execute_payload": {"_execute": True},
     }
 
     return True, risk, note, confirm
