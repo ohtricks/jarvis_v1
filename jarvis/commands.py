@@ -1,43 +1,75 @@
 from .memory import (
-    clear_memory, format_active_plan_status, clear_active_plan,
-    set_session_mode, get_session,
+    clear_memory,
+    format_active_plan_status,
+    clear_active_plan,
+    set_session_mode,
+    get_session,
 )
 from .queue import (
-    format_queue_status, clear_queue, has_active_queue, list_items,
-    mark_done, mark_skipped
+    format_queue_status,
+    clear_queue,
+    has_active_queue,
+    list_items,
+    last_blocked,
+    unblock_to_pending,
+    mark_skipped,
 )
-from .risk import handle_confirmation
-from .executor import execute_next, execute_all_until_blocked
-from .memory import get_pending  # <- vem do memory.py no seu projeto
+from .executor import execute_next, execute_until_blocked, execute_all_until_blocked
+
+
+def _handle_confirmation_v3(raw_cmd: str, skills: dict, learn_state_fn) -> str | None:
+    """
+    V3: confirmação opera diretamente na queue:
+      - acha último item blocked
+      - valida required
+      - desbloqueia -> pending (inject _execute)
+      - retoma automaticamente (execute_until_blocked)
+    """
+    c_raw = (raw_cmd or "").strip()
+    c = c_raw.lower()
+
+    it, idx = last_blocked()
+    has_blocked = bool(it)
+
+    # cancel
+    if c in ("no", "n", "cancelar", "cancel"):
+        if not has_blocked:
+            return "Não há nenhuma ação bloqueada para cancelar."
+        mark_skipped(idx, "Cancelado pelo usuário.")
+        return "Cancelado."
+
+    # confirm
+    if c in ("yes", "y", "confirmar") or c_raw.replace('"', "").strip().upper() == "YES I KNOW":
+        if not has_blocked:
+            return "Não há nenhuma ação bloqueada para confirmar."
+
+        confirm = (it.get("confirm") or {}) if isinstance(it, dict) else {}
+        required = (confirm.get("required") or "").strip()
+
+        # Regras:
+        # - danger exige "YES I KNOW"
+        # - risky aceita "yes"/"y"/"confirmar"
+        if required.upper() == "YES I KNOW":
+            if c_raw.replace('"', "").strip().upper() != "YES I KNOW":
+                return "Esta ação é PERIGOSA. Para confirmar, digite exatamente: YES I KNOW"
+        # para risky, "yes" já tá ok
+
+        execute_payload = confirm.get("execute_payload") or {"_execute": True}
+        unblock_to_pending(idx, execute_payload=execute_payload)
+
+        # retoma automaticamente até o próximo bloqueio/fim
+        return execute_until_blocked(skills, learn_state_fn)
+
+    return None
+
 
 def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
     raw = (cmd or "").strip()
     c = raw.lower()
 
-    # confirmations (NO LLM)
-    is_yes = c in ("yes", "y", "confirmar")
-    is_no = c in ("no", "n", "cancel", "cancelar")
-    is_yes_i_know = raw.replace('"', '').strip().upper() == "YES I KNOW"
-    if is_yes or is_no or is_yes_i_know:
-        pending, risk, note = get_pending()
-        out = handle_confirmation(raw, skills, learn_state_fn)
-
-        # se havia pending e ele estava ligado a um item da queue, atualiza status
-        if pending and isinstance(pending, dict) and "_queue_idx" in pending:
-            qidx = pending.get("_queue_idx")
-            try:
-                qidx = int(qidx)
-            except Exception:
-                qidx = None
-
-            if qidx is not None:
-                if is_no:
-                    mark_skipped(qidx, "Cancelado pelo usuário.")
-                else:
-                    # yes / YES I KNOW -> marca done com o output
-                    if out is not None:
-                        mark_done(qidx, out)
-
+    # confirmations (V3)
+    if c in ("yes", "y", "no", "n", "confirmar", "cancel", "cancelar") or raw.replace('"', "").strip().upper() == "YES I KNOW":
+        out = _handle_confirmation_v3(raw, skills, learn_state_fn)
         if out is not None:
             return out
 
@@ -61,6 +93,7 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
 
     # status
     if c in ("status", "status plano", "plano status"):
+        # prefer queue status if exists
         if has_active_queue():
             return format_queue_status()
         return format_active_plan_status()
@@ -74,6 +107,7 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
         for i, it in enumerate(items):
             st = it.get("status")
             step = it.get("step") or it.get("action") or ""
+
             if st == "done":
                 prefix = "✅"
             elif st == "blocked":
@@ -88,7 +122,9 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
                 prefix = "⏭️"
             else:
                 prefix = "•"
-            lines.append(f"{prefix} {i+1}. {step}")
+
+            lines.append(f"{prefix} {i+1}.\n{step}")
+
         return "\n".join(lines).strip()
 
     # cancel
@@ -97,16 +133,22 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
         clear_queue()
         return "Plano/fila cancelado. Pronto para o próximo comando."
 
-    # continue
+    # continue (V3: roda loop até bloquear)
     if c in ("continue", "continua", "continuar", "next", "seguir"):
         if not has_active_queue():
             return "Não há fila ativa. Use 'plan:' para criar um plano."
-        return execute_next(skills, learn_state_fn)
+        return execute_until_blocked(skills, learn_state_fn)
 
     # run all
     if c in ("executar tudo", "executar todas", "executar todas as etapas", "run all", "execute all"):
         if not has_active_queue():
             return "Não há fila ativa."
         return execute_all_until_blocked(skills, learn_state_fn)
+
+    # (opcional) ainda permite “um passo só”
+    if c in ("executar proximo", "executar próximo", "run next"):
+        if not has_active_queue():
+            return "Não há fila ativa."
+        return execute_next(skills, learn_state_fn)
 
     return None

@@ -1,18 +1,28 @@
-from .queue import next_pending, first_blocked, mark_running, mark_done, mark_failed, mark_blocked
+from typing import Tuple
+
+from .queue import (
+    next_pending,
+    mark_running,
+    mark_done,
+    mark_failed,
+    mark_blocked,
+)
 from .risk import require_confirmation, confirm_message
 from .memory import get_session
 
-def execute_next(skills: dict, learn_state_fn) -> str:
-    it, idx = next_pending()
 
-    # se não tem pending, mas tem blocked => re-exibe a confirmação
+def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
+    """
+    Executa 1 item pendente.
+    Retorna (mensagem, state) onde state ∈:
+      - done
+      - blocked
+      - empty
+      - failed
+    """
+    it, idx = next_pending()
     if not it:
-        blocked_it, bidx = first_blocked()
-        if blocked_it:
-            risk = blocked_it.get("risk") or "risky"
-            note = blocked_it.get("error") or "Confirmação necessária."
-            return confirm_message(risk, note)
-        return "Não há itens pendentes na fila."
+        return "Não há itens pendentes na fila.", "empty"
 
     action = it.get("action")
     args = it.get("args", {}) or {}
@@ -20,67 +30,75 @@ def execute_next(skills: dict, learn_state_fn) -> str:
     sess = get_session()
     mode = (sess.get("mode") or "dry").lower()
 
-    # decide execução desejada
+    # decide execução desejada: dry -> nunca executa
     desired_execute = (mode == "execute")
     if mode == "safe":
-        desired_execute = True  # safe-mode executa safe automaticamente; risky/danger bloqueia via gate
+        # safe mode executa apenas safe automaticamente; risky/danger sempre bloqueia
+        desired_execute = True  # mas o gate bloqueia risky/danger
 
     if action not in skills:
         mark_failed(idx, f"Ação desconhecida: {action}")
-        return f"Ação desconhecida: {action}"
+        return f"Ação desconhecida: {action}", "failed"
 
-    # injeta metadados pra confirmação conseguir atualizar a fila
-    args_with_meta = dict(args)
-    args_with_meta["_queue_idx"] = idx
-
-    # Risk gate
-    blocked, risk, note = require_confirmation(action, args_with_meta, skills, desired_execute=desired_execute)
-
+    # Risk gate (V3): se bloquear, grava confirm no item bloqueado
+    blocked, risk, note, confirm = require_confirmation(
+        action,
+        args,
+        desired_execute=desired_execute,
+    )
     if blocked:
-        mark_blocked(idx, risk, note)
-        return confirm_message(risk, note)
+        mark_blocked(idx, risk, note, confirm=confirm)
+        return confirm_message(risk, note), "blocked"
 
-    # Execução
+    # Execução real (única fonte de execução)
     mark_running(idx)
     try:
         skill = skills[action]
+
+        # força execute conforme modo
         old_execute = getattr(skill, "execute", None)
         try:
             if old_execute is not None:
                 skill.execute = bool(desired_execute)
 
-            # remove meta antes de enviar pra skill
-            clean_args = {k: v for k, v in args.items()}
-            learn_state_fn(action, clean_args)
-            out = skill.run(clean_args)
+            learn_state_fn(action, args)
+            out = skill.run(args)
         finally:
             if old_execute is not None:
                 skill.execute = old_execute
 
         mark_done(idx, out)
-        return out
+        return out, "done"
+
     except Exception as e:
         mark_failed(idx, str(e))
-        return f"Erro ao executar ação: {e}"
+        return f"Erro ao executar ação: {e}", "failed"
 
 
-def execute_all_until_blocked(skills: dict, learn_state_fn) -> str:
+def execute_next(skills: dict, learn_state_fn) -> str:
+    msg, _state = execute_one(skills, learn_state_fn)
+    return msg
+
+
+def execute_until_blocked(skills: dict, learn_state_fn, max_steps: int = 50) -> str:
+    """
+    V3: loop contínuo até:
+      - fila acabar
+      - bloquear (confirmação)
+      - falhar
+    """
     outputs = []
-    while True:
-        it, _ = next_pending()
-        if not it:
-            # se ficou bloqueado, devolve a confirmação; se não, termina
-            blocked_it, _bidx = first_blocked()
-            if blocked_it:
-                risk = blocked_it.get("risk") or "risky"
-                note = blocked_it.get("error") or "Confirmação necessária."
-                outputs.append(confirm_message(risk, note))
-            break
+    for _ in range(max_steps):
+        msg, state = execute_one(skills, learn_state_fn)
+        if msg:
+            outputs.append(msg)
 
-        out = execute_next(skills, learn_state_fn)
-        outputs.append(out)
-
-        if out.startswith("⚠️"):
+        if state in ("empty", "blocked", "failed"):
             break
 
     return "\n".join([o for o in outputs if o]).strip() or "Ok."
+
+
+# compat com comando antigo "executar tudo"
+def execute_all_until_blocked(skills: dict, learn_state_fn) -> str:
+    return execute_until_blocked(skills, learn_state_fn)

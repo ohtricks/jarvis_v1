@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any, Optional, Tuple
 
+
 QUEUE_PATH = Path.home() / ".jarvis" / "queue.json"
 
 
@@ -21,6 +22,7 @@ def load_queue() -> dict[str, Any]:
     _ensure_dir()
     if not QUEUE_PATH.exists():
         return _default()
+
     try:
         data = json.loads(QUEUE_PATH.read_text(encoding="utf-8"))
         if not isinstance(data.get("items"), list):
@@ -34,7 +36,10 @@ def load_queue() -> dict[str, Any]:
 
 def save_queue(q: dict[str, Any]) -> None:
     _ensure_dir()
-    QUEUE_PATH.write_text(json.dumps(q, ensure_ascii=False, indent=2), encoding="utf-8")
+    QUEUE_PATH.write_text(
+        json.dumps(q, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def clear_queue() -> None:
@@ -51,19 +56,26 @@ def enqueue_plan(goal: str, plan: list[dict]) -> None:
         action = step.get("action")
         if not action:
             continue
+
         args = {k: v for k, v in step.items() if k not in ("step", "action")}
-        items.append({
-            "id": f"a_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{i+1}",
-            "ts": now,
-            "step_index": i,
-            "step": step.get("step") or action,
-            "status": "pending",  # pending|running|blocked|done|failed|skipped
-            "action": action,
-            "args": args,
-            "risk": None,
-            "result": None,
-            "error": None,
-        })
+
+        items.append(
+            {
+                "id": f"a_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{i+1}",
+                "ts": now,
+                "step_index": i,
+                "step": step.get("step") or action,
+                "status": "pending",  # pending|running|blocked|done|failed|skipped
+                "action": action,
+                "args": args,
+                "risk": None,
+                "result": None,
+                "error": None,
+                # V3 fields:
+                "blocked_reason": None,
+                "confirm": None,
+            }
+        )
 
     q["items"] = items
     save_queue(q)
@@ -85,9 +97,10 @@ def next_pending() -> Tuple[Optional[dict], int]:
     return None, -1
 
 
-def first_blocked() -> Tuple[Optional[dict], int]:
+def last_blocked() -> Tuple[Optional[dict], int]:
     items = list_items()
-    for idx, it in enumerate(items):
+    for idx in range(len(items) - 1, -1, -1):
+        it = items[idx]
         if it.get("status") == "blocked":
             return it, idx
     return None, -1
@@ -98,9 +111,11 @@ def set_item(idx: int, patch: dict) -> None:
     items = q.get("items", []) or []
     if idx < 0 or idx >= len(items):
         return
+
     it = items[idx]
     for k, v in patch.items():
         it[k] = v
+
     items[idx] = it
     q["items"] = items
     save_queue(q)
@@ -115,15 +130,46 @@ def mark_failed(idx: int, error: str) -> None:
 
 
 def mark_skipped(idx: int, note: str = "Cancelado.") -> None:
-    set_item(idx, {"status": "skipped", "error": note})
+    set_item(idx, {"status": "skipped", "error": note, "confirm": None, "blocked_reason": None})
 
 
-def mark_blocked(idx: int, risk: str, note: str) -> None:
-    set_item(idx, {"status": "blocked", "risk": risk, "error": note})
+def mark_blocked(idx: int, risk: str, note: str, confirm: Optional[dict] = None) -> None:
+    # V3: o bloqueio (pendência) fica no próprio item da fila
+    set_item(
+        idx,
+        {
+            "status": "blocked",
+            "risk": risk,
+            "error": note,  # mantém compat com UI existente
+            "blocked_reason": note,
+            "confirm": confirm,
+        },
+    )
 
 
 def mark_running(idx: int) -> None:
     set_item(idx, {"status": "running"})
+
+
+def unblock_to_pending(idx: int, execute_payload: Optional[dict] = None) -> None:
+    q = load_queue()
+    items = q.get("items", []) or []
+    if idx < 0 or idx >= len(items):
+        return
+
+    it = items[idx]
+    it["status"] = "pending"
+    it["blocked_reason"] = None
+    it["confirm"] = None
+
+    if execute_payload:
+        args = it.get("args") or {}
+        args.update(execute_payload)
+        it["args"] = args
+
+    items[idx] = it
+    q["items"] = items
+    save_queue(q)
 
 
 def has_active_queue() -> bool:
@@ -135,11 +181,10 @@ def format_queue_status() -> str:
     q = load_queue()
     goal = q.get("goal")
     items = q.get("items", []) or []
-
     if not items:
         return "Não há fila ativa."
 
-    done = sum(1 for i in items if i.get("status") in ("done", "skipped"))
+    done = sum(1 for i in items if i.get("status") == "done")
     total = len(items)
 
     lines = []
@@ -151,6 +196,7 @@ def format_queue_status() -> str:
     for i, it in enumerate(items):
         st = it.get("status")
         step = it.get("step") or it.get("action") or ""
+
         if st == "done":
             prefix = "✅"
         elif st == "blocked":
@@ -165,6 +211,7 @@ def format_queue_status() -> str:
             prefix = "⏭️"
         else:
             prefix = "•"
+
         lines.append(f"{prefix} [{i+1}] {step} ({it.get('action')})")
 
     return "\n".join(lines).strip()
