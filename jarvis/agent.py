@@ -11,6 +11,7 @@ from .context_engine import update_context_state
 from .queue import enqueue_plan, clear_queue, has_active_queue
 from .executor import execute_until_blocked
 from .telemetry import start_debug_entry, debug_set, flush_debug_entry
+from .ux import ux_stage, ux_format_response
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
@@ -66,9 +67,13 @@ class JarvisAgent:
                 pass
             return resp
 
+        stages: list[str] = []
+
         try:
             # captura contexto do sistema antes de tudo (silencioso em caso de erro)
             update_context_state()
+
+            stages.append(ux_stage("analisando"))
 
             # built-ins first (NO LLM)
             out = handle_builtin(user_input, self.SKILLS, self._learn_state_from_action)
@@ -93,6 +98,9 @@ class JarvisAgent:
 
             # planner route => create queue + execute until blocked/end (V3)
             if r["route"] == "planner":
+                stages.append(ux_stage("roteando", "planner"))
+                stages.append(ux_stage("planejando", "reasoning"))
+
                 plan_data = make_plan(text)
                 goal = plan_data["goal"]
                 plan = plan_data["plan"]
@@ -100,21 +108,27 @@ class JarvisAgent:
                 clear_queue()
                 enqueue_plan(goal, plan)
 
+                stages.append(ux_stage("enfileirando"))
+                stages.append(ux_stage("executando"))
+
                 run_out = execute_until_blocked(self.SKILLS, self._learn_state_from_action)
 
-                # se ainda sobrou fila (blocked/pending), orienta
-                if has_active_queue():
-                    run_out = (
-                        run_out
-                        + "\n\n➡️ Se bloquear, confirme com 'yes' ou 'YES I KNOW'. "
-                          "Para seguir manualmente: 'continue'. "
-                          "Para rodar tudo até o próximo bloqueio: 'executar tudo'."
-                    )
-                return remember(run_out)
+                blocked = has_active_queue()
+                if blocked:
+                    stages.append(ux_stage("bloqueado", "aguardando confirmação"))
+                else:
+                    stages.append(ux_stage("finalizado"))
+
+                if DEBUG:
+                    debug_set("ux_stages", stages)
+                return remember(ux_format_response(stages, run_out, blocked))
 
             # executor route => fast/brain compila 1-3 ações diretas (sem reasoning)
             if r["route"] == "executor":
                 exec_model = r.get("executor_model", "fast")
+                stages.append(ux_stage("roteando", f"executor ({exec_model})"))
+                stages.append(ux_stage("compilando", exec_model))
+
                 result = make_actions(text, model=exec_model)
 
                 # chat: skill inexistente ou limitação — responde direto
@@ -127,14 +141,20 @@ class JarvisAgent:
                 clear_queue()
                 enqueue_plan(goal, plan)
 
+                stages.append(ux_stage("enfileirando"))
+                stages.append(ux_stage("executando"))
+
                 run_out = execute_until_blocked(self.SKILLS, self._learn_state_from_action)
-                if has_active_queue():
-                    run_out = (
-                        run_out
-                        + "\n\n➡️ Se bloquear, confirme com 'yes' ou 'YES I KNOW'. "
-                          "Para seguir manualmente: 'continue'."
-                    )
-                return remember(run_out)
+
+                blocked = has_active_queue()
+                if blocked:
+                    stages.append(ux_stage("bloqueado", "aguardando confirmação"))
+                else:
+                    stages.append(ux_stage("finalizado"))
+
+                if DEBUG:
+                    debug_set("ux_stages", stages)
+                return remember(ux_format_response(stages, run_out, blocked))
 
             return remember("Não consegui processar seu pedido agora.")
 

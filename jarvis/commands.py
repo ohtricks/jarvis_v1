@@ -16,6 +16,15 @@ from .queue import (
 )
 from .executor import execute_next, execute_until_blocked, execute_all_until_blocked
 
+_YES_WORDS = frozenset({
+    "yes", "y", "confirmar",
+    "sim", "s", "ok", "okay", "manda ver", "pode", "pode continuar", "vai", "confirmo",
+})
+_NO_WORDS = frozenset({
+    "no", "n", "cancel", "cancelar",
+    "não", "nao", "cancela", "para", "parar",
+})
+
 
 def _handle_confirmation_v3(raw_cmd: str, skills: dict, learn_state_fn) -> str | None:
     """
@@ -32,14 +41,14 @@ def _handle_confirmation_v3(raw_cmd: str, skills: dict, learn_state_fn) -> str |
     has_blocked = bool(it)
 
     # cancel
-    if c in ("no", "n", "cancelar", "cancel"):
+    if c in _NO_WORDS:
         if not has_blocked:
             return "Não há nenhuma ação bloqueada para cancelar."
         mark_skipped(idx, "Cancelado pelo usuário.")
         return "Cancelado."
 
     # confirm
-    if c in ("yes", "y", "confirmar") or c_raw.replace('"', "").strip().upper() == "YES I KNOW":
+    if c in _YES_WORDS or c_raw.replace('"', "").strip().upper() == "YES I KNOW":
         if not has_blocked:
             return "Não há nenhuma ação bloqueada para confirmar."
 
@@ -68,7 +77,7 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
     c = raw.lower()
 
     # confirmations (V3)
-    if c in ("yes", "y", "no", "n", "confirmar", "cancel", "cancelar") or raw.replace('"', "").strip().upper() == "YES I KNOW":
+    if c in _YES_WORDS | _NO_WORDS or raw.replace('"', "").strip().upper() == "YES I KNOW":
         out = _handle_confirmation_v3(raw, skills, learn_state_fn)
         if out is not None:
             return out
