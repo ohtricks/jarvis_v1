@@ -6,6 +6,7 @@ from .memory import add_turn, set_state, set_session, get_session
 from .commands import handle_builtin
 from .router import route_input, strip_forced_prefix
 from .planner import make_plan
+from .executor_llm import make_actions
 from .queue import enqueue_plan, clear_queue, has_active_queue
 from .executor import execute_until_blocked
 from .telemetry import start_debug_entry, debug_set, flush_debug_entry
@@ -107,11 +108,17 @@ class JarvisAgent:
                     )
                 return remember(run_out)
 
-            # executor route => executa todos os steps do plano
+            # executor route => fast/brain compila 1-3 ações diretas (sem reasoning)
             if r["route"] == "executor":
-                plan_data = make_plan(text)
-                goal = plan_data["goal"]
-                plan = plan_data["plan"]
+                exec_model = r.get("executor_model", "fast")
+                result = make_actions(text, model=exec_model)
+
+                # chat: skill inexistente ou limitação — responde direto
+                if "chat" in result:
+                    return remember(result["chat"])
+
+                goal = result["goal"]
+                plan = result["plan"]
 
                 clear_queue()
                 enqueue_plan(goal, plan)

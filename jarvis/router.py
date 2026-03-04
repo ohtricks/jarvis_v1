@@ -22,6 +22,9 @@ def strip_forced_prefix(user_input: str) -> tuple[str, str | None]:
             return raw[len(p):].strip(), route
     return raw, None
 
+def _safe_executor_model(value) -> str:
+    return value if value in ("fast", "brain") else "fast"
+
 def route_input(user_input: str) -> dict:
     msgs = [
         {"role": "system", "content": ROUTER_PROMPT},
@@ -36,18 +39,23 @@ def route_input(user_input: str) -> dict:
     if route not in ("fast_reply", "planner", "executor"):
         debug_set("route", "executor")
         debug_set("route_forced", False)
-        return {"route": "executor", "needs_actions": True}
+        return {"route": "executor", "needs_actions": True, "executor_model": "fast"}
 
     if route == "fast_reply":
         resp = (data.get("response") or "").strip()
         if not resp:
             debug_set("route", "executor")
             debug_set("route_forced", False)
-            return {"route": "executor", "needs_actions": False}
+            return {"route": "executor", "needs_actions": False, "executor_model": "fast"}
         debug_set("route", "fast_reply")
         debug_set("route_forced", False)
         return {"route": "fast_reply", "needs_actions": False, "response": resp}
 
+    executor_model = _safe_executor_model(data.get("executor_model"))
     debug_set("route", route)
     debug_set("route_forced", False)
-    return {"route": route, "needs_actions": bool(data.get("needs_actions", True))}
+    return {
+        "route": route,
+        "needs_actions": bool(data.get("needs_actions", True)),
+        "executor_model": executor_model,
+    }
