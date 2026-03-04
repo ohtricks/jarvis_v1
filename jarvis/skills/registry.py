@@ -1,15 +1,23 @@
 from .open_app import OpenAppSkill
 from .open_url import OpenUrlSkill
 from .run_shell import RunShellSkill
+from .git.git_status import GitStatusSkill
+from .git.git_add_all import GitAddAllSkill
+from .git.git_commit import GitCommitSkill
+from .git.git_push import GitPushSkill
 from .capabilities import Capability, format_capabilities_for_prompt
 
 
 def build_skills(execute: bool = False):
     """Retorna dict action->skill_obj. Contrato imutável — executor.py depende disso."""
     return {
-        "open_app": OpenAppSkill(execute=execute),
-        "open_url": OpenUrlSkill(execute=execute),
-        "run_shell": RunShellSkill(execute=execute),
+        "open_app":   OpenAppSkill(execute=execute),
+        "open_url":   OpenUrlSkill(execute=execute),
+        "run_shell":  RunShellSkill(execute=execute),
+        "git_status": GitStatusSkill(),
+        "git_add_all": GitAddAllSkill(execute=execute),
+        "git_commit":  GitCommitSkill(execute=execute),
+        "git_push":    GitPushSkill(execute=execute),
     }
 
 
@@ -53,6 +61,42 @@ _CATALOG: list[Capability] = [
         args_schema={"response": "string"},
         examples=["o que é Python?", "explique git rebase"],
         risk="safe",
+    ),
+    Capability(
+        name="git_status",
+        namespace="git",
+        title="Git Status",
+        description="Mostra o status do repositório git no diretório atual.",
+        args_schema={"cwd": "string?"},
+        examples=["ver status do git", "git status", "o que mudou?"],
+        risk="safe",
+    ),
+    Capability(
+        name="git_add_all",
+        namespace="git",
+        title="Git Add All",
+        description="Adiciona todos os arquivos modificados ao stage (git add -A).",
+        args_schema={"cwd": "string?"},
+        examples=["adicionar tudo", "stage tudo", "git add all"],
+        risk="risky",
+    ),
+    Capability(
+        name="git_commit",
+        namespace="git",
+        title="Git Commit",
+        description="Cria um commit com a mensagem fornecida.",
+        args_schema={"message": "string", "cwd": "string?"},
+        examples=["commite com mensagem fix bug", "git commit -m 'feat: nova feature'"],
+        risk="risky",
+    ),
+    Capability(
+        name="git_push",
+        namespace="git",
+        title="Git Push",
+        description="Envia commits para o repositório remoto.",
+        args_schema={"remote": "string?", "branch": "string?", "cwd": "string?"},
+        examples=["sobe as mudanças", "push", "git push origin main"],
+        risk="risky",
     ),
 ]
 

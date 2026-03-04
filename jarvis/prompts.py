@@ -11,7 +11,8 @@ Regras:
 - executor + executor_model="fast":
     • abrir apps/urls, rodar comandos diretos.
     • pode ter 2-3 ações simples conectadas por "e"/"depois" (open_app, open_url, run_shell simples).
-    • exemplos: "abra o chrome", "abra o chrome e o youtube", "rode git status e depois git diff".
+    • git workflow (status/add/commit/push) sem análise de código → executor+fast.
+    • exemplos: "abra o chrome", "abra o chrome e o youtube", "rode git status e depois git diff", "commite com mensagem X", "commite e suba".
 - executor + executor_model="brain":
     • envolve objetivo semântico/contextual: "me fale", "resuma", "liste", "extraia", "compare", "o que chegou".
     • exemplos: "abra o gmail e me fale os assuntos dos emails de hoje".
@@ -51,7 +52,11 @@ Responda APENAS JSON válido, sem texto extra.
 Dado um pedido que normalmente é UMA ação, retorne:
 {"action":"open_app","app":"Safari"}
 {"action":"open_url","url":"https://mail.google.com","browser":"Google Chrome"}
-{"action":"run_shell","command":"git status","cwd":"/caminho/opcional"}
+{"action":"run_shell","command":"ls -la","cwd":"/caminho/opcional"}
+{"action":"git_status"}
+{"action":"git_add_all"}
+{"action":"git_commit","message":"fix shell_policy"}
+{"action":"git_push","remote":"origin","branch":"main"}
 ou se for só conversa:
 {"action":"chat","response":"..."}
 """
@@ -59,14 +64,22 @@ ou se for só conversa:
 ACTION_COMPILER_PROMPT = """
 Responda APENAS JSON válido, sem texto extra.
 
-Ações disponíveis: open_app {app}, open_url {url, browser?}, run_shell {command, cwd?}, chat {response}
+Ações disponíveis:
+- open_app {app}
+- open_url {url, browser?}
+- run_shell {command, cwd?}
+- git_status {cwd?}
+- git_add_all {cwd?}
+- git_commit {message, cwd?}
+- git_push {remote?, branch?}
+- chat {response}
 
 Retorne UMA das formas:
 
 A) Ação única:
 {"action":"open_app","app":"Google Chrome"}
 
-B) Plano com 2-3 passos (quando houver múltiplas ações diretas):
+B) Plano com 2-4 passos (quando houver múltiplas ações diretas):
 {"goal":"abrir chrome e youtube","plan":[
   {"step":"Abrir Chrome","action":"open_app","app":"Google Chrome"},
   {"step":"Abrir YouTube","action":"open_url","url":"https://youtube.com"}
@@ -75,8 +88,17 @@ B) Plano com 2-3 passos (quando houver múltiplas ações diretas):
 C) Chat (quando não conseguir mapear em ações ou skill inexistente):
 {"action":"chat","response":"Não consigo fazer isso ainda. Tente 'plan:' para um plano detalhado."}
 
+Git workflow:
+- "ver status / git status" → {"action":"git_status"}
+- "adicionar tudo / stage tudo / git add" → {"action":"git_add_all"}
+- "commitar / commit com mensagem X" → {"action":"git_commit","message":"X"}
+- "subir / push" → {"action":"git_push"}
+- "commit e push" → plan 3 passos: git_add_all → git_commit → git_push
+- "commite tudo e sobe / commit tudo e push" → plan 4 passos: git_status → git_add_all → git_commit → git_push
+- Se mensagem do commit não estiver clara: {"action":"chat","response":"Qual mensagem do commit?"}
+
 Regras:
-- No máximo 3 passos no plan.
+- No máximo 4 passos no plan.
 - Não invente skills além das listadas.
 - Use URLs completas com https://.
 - Se o pedido exigir skill inexistente (ex: ler emails, acessar calendário), use chat explicando a limitação.
