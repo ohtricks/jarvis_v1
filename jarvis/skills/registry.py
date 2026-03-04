@@ -5,6 +5,7 @@ from .git.git_status import GitStatusSkill
 from .git.git_add_all import GitAddAllSkill
 from .git.git_commit import GitCommitSkill
 from .git.git_push import GitPushSkill
+from .gmail_list_today import GmailListTodaySkill
 from .capabilities import Capability, format_capabilities_for_prompt
 
 
@@ -14,10 +15,11 @@ def build_skills(execute: bool = False):
         "open_app":   OpenAppSkill(execute=execute),
         "open_url":   OpenUrlSkill(execute=execute),
         "run_shell":  RunShellSkill(execute=execute),
-        "git_status": GitStatusSkill(),
-        "git_add_all": GitAddAllSkill(execute=execute),
-        "git_commit":  GitCommitSkill(execute=execute),
-        "git_push":    GitPushSkill(execute=execute),
+        "git_status":       GitStatusSkill(),
+        "git_add_all":      GitAddAllSkill(execute=execute),
+        "git_commit":       GitCommitSkill(execute=execute),
+        "git_push":         GitPushSkill(execute=execute),
+        "gmail_list_today": GmailListTodaySkill(),
     }
 
 
@@ -97,6 +99,15 @@ _CATALOG: list[Capability] = [
         args_schema={"remote": "string?", "branch": "string?", "cwd": "string?"},
         examples=["sobe as mudanças", "push", "git push origin main"],
         risk="risky",
+    ),
+    Capability(
+        name="gmail_list_today",
+        namespace="gmail",
+        title="Listar emails recentes",
+        description="Lista os emails mais recentes da caixa de entrada do Gmail.",
+        args_schema={"account": "string?", "max_results": "integer?"},
+        examples=["leia meus emails", "últimos emails do gmail", "ver inbox"],
+        risk="safe",
     ),
 ]
 

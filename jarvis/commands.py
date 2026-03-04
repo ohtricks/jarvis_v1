@@ -176,9 +176,51 @@ def _handle_confirmation_v3(raw_cmd: str, skills: dict, learn_state_fn) -> str |
     return None
 
 
+# ── Gmail keywords ────────────────────────────────────────────────────────────
+_GMAIL_KEYWORDS = frozenset({
+    "gmail", "email", "emails", "inbox", "caixa de entrada",
+})
+_GMAIL_READ_WORDS = frozenset({
+    "ler", "leia", "listar", "lista", "ver", "veja",
+    "mostre", "mostra", "últimos", "ultimos", "recentes", "recente", "novos",
+})
+
+
+def _detect_gmail_read(words: set[str]) -> bool:
+    return bool(words & _GMAIL_KEYWORDS) and bool(words & _GMAIL_READ_WORDS)
+
+
 def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
     raw = (cmd or "").strip()
     c = raw.lower()
+
+    # ── Gmail: builtin explícito "auth gmail [alias]" ─────────────────────────
+    if c == "auth gmail" or c.startswith("auth gmail "):
+        alias = raw[len("auth gmail"):].strip() or "default"
+        from .wizards.gmail_oauth_wizard import run_gmail_oauth_wizard
+        _success, msg = run_gmail_oauth_wizard(initial_alias=alias if alias != "default" else None)
+        return msg
+
+    # ── Gmail: auto-wizard quando não autenticado ─────────────────────────────
+    words = set(c.split())
+    if _detect_gmail_read(words):
+        from .gmail_api import is_authenticated
+        alias = "default"
+        if not is_authenticated(alias):
+            print("\nEu preciso acessar o Gmail. Iniciando configuração OAuth...\n", flush=True)
+            from .wizards.gmail_oauth_wizard import run_gmail_oauth_wizard
+            success, msg = run_gmail_oauth_wizard(initial_alias=None)
+            if not success:
+                return msg
+            # Auto-retry direto via skill (sem LLM)
+            if "gmail_list_today" in skills:
+                result = skills["gmail_list_today"].run({"account": alias})
+                return f"{msg}\n\nBuscando seus emails...\n\n{result}"
+            return f"{msg}\n\nAgora você pode pedir novamente para listar seus emails."
+        else:
+            # Já autenticado: despacha direto para skill (sem LLM)
+            if "gmail_list_today" in skills:
+                return skills["gmail_list_today"].run({"account": alias})
 
     # Prioridade 0: Policy proposal ("adicionar safe/risky/danger")
     # Separado do risk gate e do recovery gate — altera ~/.jarvis/risk_policy.json.

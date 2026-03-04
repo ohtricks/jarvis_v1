@@ -57,6 +57,7 @@ Dado um pedido que normalmente é UMA ação, retorne:
 {"action":"git_add_all"}
 {"action":"git_commit","message":"fix shell_policy"}
 {"action":"git_push","remote":"origin","branch":"main"}
+{"action":"gmail_list_today","account":"default","max_results":10}
 ou se for só conversa:
 {"action":"chat","response":"..."}
 """
@@ -72,6 +73,7 @@ Ações disponíveis:
 - git_add_all {cwd?}
 - git_commit {message, cwd?}
 - git_push {remote?, branch?}
+- gmail_list_today {account?, max_results?}
 - chat {response}
 
 Retorne UMA das formas:
@@ -97,11 +99,15 @@ Git workflow:
 - "commite tudo e sobe / commit tudo e push" → plan 4 passos: git_status → git_add_all → git_commit → git_push
 - Se mensagem do commit não estiver clara: {"action":"chat","response":"Qual mensagem do commit?"}
 
+Gmail:
+- "ler emails / últimos emails / ver inbox / gmail" → {"action":"gmail_list_today","account":"default"}
+- "últimos N emails" → {"action":"gmail_list_today","account":"default","max_results":N}
+
 Regras:
 - No máximo 4 passos no plan.
 - Não invente skills além das listadas.
 - Use URLs completas com https://.
-- Se o pedido exigir skill inexistente (ex: ler emails, acessar calendário), use chat explicando a limitação.
+- Se o pedido exigir skill inexistente (ex: acessar calendário, Google Drive), use chat explicando a limitação.
 """
 
 def clean_json(text: str) -> str:

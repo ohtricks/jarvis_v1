@@ -10,6 +10,15 @@ METRICS_PATH = Path.home() / ".jarvis" / "metrics.json"
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
+
+def _safe_input(s: str) -> str:
+    """Mascara user_input se contiver credenciais/tokens antes de gravar no log."""
+    try:
+        from .security import redact
+        return redact(s)
+    except Exception:
+        return s
+
 def _ensure():
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -61,7 +70,7 @@ def start_debug_entry(user_input: str, mode: str) -> None:
     _debug_entry = {
         "ts": datetime.utcnow().isoformat() + "Z",
         "request_id": uuid.uuid4().hex[:8],
-        "user_input": user_input,
+        "user_input": _safe_input(user_input),
         "mode": mode,
         "route": None,
         "route_forced": False,

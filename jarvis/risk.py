@@ -17,14 +17,17 @@ def classify_action_risk(action: str, args: dict) -> Tuple[str, str, str]:
     if action in ("open_app", "open_url"):
         return "safe", "", "fixed"
 
-    _GIT_SKILL_RISK = {
-        "git_status":   ("safe",   "",                                                "fixed"),
-        "git_add_all":  ("risky",  "Vai adicionar todos os arquivos ao stage.",       "fixed"),
-        "git_commit":   ("risky",  "Vai criar um commit no repositório.",             "fixed"),
-        "git_push":     ("risky",  "Vai enviar commits para o repositório remoto.",   "fixed"),
+    _FIXED_SKILL_RISK = {
+        # Git
+        "git_status":       ("safe",   "",                                                "fixed"),
+        "git_add_all":      ("risky",  "Vai adicionar todos os arquivos ao stage.",       "fixed"),
+        "git_commit":       ("risky",  "Vai criar um commit no repositório.",             "fixed"),
+        "git_push":         ("risky",  "Vai enviar commits para o repositório remoto.",   "fixed"),
+        # Gmail
+        "gmail_list_today": ("safe",   "",                                                "fixed"),
     }
-    if action in _GIT_SKILL_RISK:
-        return _GIT_SKILL_RISK[action]
+    if action in _FIXED_SKILL_RISK:
+        return _FIXED_SKILL_RISK[action]
 
     if action != "run_shell":
         return "risky", "Ação não classificada.", "fixed"
