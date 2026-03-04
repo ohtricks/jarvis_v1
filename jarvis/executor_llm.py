@@ -1,6 +1,7 @@
 from .llm import ask_llm
 from .prompts import ACTION_COMPILER_PROMPT, safe_load
 from .telemetry import debug_set
+from .skills.registry import get_capabilities_text
 
 
 def make_actions(user_input: str, model: str) -> dict:
@@ -11,8 +12,10 @@ def make_actions(user_input: str, model: str) -> dict:
       {"goal": str, "plan": [...]}  — steps prontos para enqueue_plan()
       {"chat": str}                 — resposta direta sem enfileirar
     """
+    caps = get_capabilities_text()
+    system = ACTION_COMPILER_PROMPT + "\n\n" + caps
     msgs = [
-        {"role": "system", "content": ACTION_COMPILER_PROMPT},
+        {"role": "system", "content": system},
         {"role": "user", "content": user_input},
     ]
     raw = ask_llm(msgs, model=model, temperature=0.0, role="executor_llm")

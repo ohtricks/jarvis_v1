@@ -15,6 +15,7 @@ from .queue import (
     mark_skipped,
 )
 from .executor import execute_next, execute_until_blocked, execute_all_until_blocked
+from .skills.registry import get_capabilities, get_capabilities_text
 
 _YES_WORDS = frozenset({
     "yes", "y", "confirmar",
@@ -154,10 +155,27 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
             return "Não há fila ativa."
         return execute_all_until_blocked(skills, learn_state_fn)
 
-    # (opcional) ainda permite “um passo só”
+    # (opcional) ainda permite "um passo só"
     if c in ("executar proximo", "executar próximo", "run next"):
         if not has_active_queue():
             return "Não há fila ativa."
         return execute_next(skills, learn_state_fn)
+
+    # capability discovery
+    if c in ("skills", "capabilities", "habilidades", "capacidades"):
+        caps = get_capabilities()
+        by_ns: dict[str, list] = {}
+        for cap in caps:
+            by_ns.setdefault(cap.namespace, []).append(cap)
+        lines = ["Capabilities disponíveis:\n"]
+        for ns, ns_caps in by_ns.items():
+            lines.append(f"[{ns}]")
+            for cap in ns_caps:
+                risk_tag = f" ({cap.risk})" if cap.risk != "safe" else ""
+                lines.append(f"  • {cap.name}{risk_tag} — {cap.description}")
+                if cap.examples:
+                    exs = " | ".join(f'"{e}"' for e in cap.examples[:2])
+                    lines.append(f"    ex: {exs}")
+        return "\n".join(lines)
 
     return None

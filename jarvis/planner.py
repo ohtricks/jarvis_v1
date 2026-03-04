@@ -3,13 +3,15 @@ from .llm import ask_llm
 from .prompts import PLANNER_PROMPT, safe_load
 from .memory import build_context, should_inject_memory
 from .telemetry import debug_set
+from .skills.registry import get_capabilities_text
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
 def make_plan(user_input: str) -> dict:
     inject = should_inject_memory(user_input)
     context = build_context(max_turns=4) if inject else ""
-    system = PLANNER_PROMPT + ("\n\n" + context if context else "")
+    caps = get_capabilities_text()
+    system = PLANNER_PROMPT + "\n\n" + caps + ("\n\n" + context if context else "")
 
     debug_set("memory_injected", inject)
 
