@@ -4,10 +4,13 @@ from .memory import (
     clear_active_plan,
     set_session_mode,
     get_session,
+    get_pending_recovery,
+    clear_pending_recovery,
 )
 from .queue import (
     format_queue_status,
     clear_queue,
+    enqueue_plan,
     has_active_queue,
     list_items,
     last_blocked,
@@ -25,6 +28,37 @@ _NO_WORDS = frozenset({
     "no", "n", "cancel", "cancelar",
     "não", "nao", "cancela", "para", "parar",
 })
+
+# Palavras exclusivas do approval gate de recovery (separadas do risk gate)
+_RECOVERY_APPROVE = frozenset({
+    "ok", "okay", "sim", "s", "manda ver", "pode", "pode tentar", "executa",
+    "continue com o plano",
+})
+_RECOVERY_REJECT = frozenset({
+    "não", "nao", "n", "cancela", "cancelar", "deixa", "parar",
+})
+
+
+def _handle_recovery_confirmation(c: str, skills: dict, learn_state_fn, proposal: dict) -> str:
+    """
+    Executa ou rejeita um recovery plan pendente.
+    Separado do risk gate — não usa _YES_WORDS/_NO_WORDS diretamente.
+    """
+    if c in _RECOVERY_APPROVE:
+        plan = proposal.get("plan") or []
+        if not plan:
+            clear_pending_recovery()
+            return "Nao ha passos de recovery para executar. Verifique manualmente."
+
+        goal = proposal.get("goal") or "Recuperacao automatica"
+        clear_queue()
+        enqueue_plan(goal, plan)
+        clear_pending_recovery()
+        return execute_until_blocked(skills, learn_state_fn)
+
+    # rejeitar
+    clear_pending_recovery()
+    return "Ok, nao vou tentar automaticamente. Me diga como voce quer proceder."
 
 
 def _handle_confirmation_v3(raw_cmd: str, skills: dict, learn_state_fn) -> str | None:
@@ -77,11 +111,27 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
     raw = (cmd or "").strip()
     c = raw.lower()
 
-    # confirmations (V3)
-    if c in _YES_WORDS | _NO_WORDS or raw.replace('"', "").strip().upper() == "YES I KNOW":
-        out = _handle_confirmation_v3(raw, skills, learn_state_fn)
-        if out is not None:
-            return out
+    # Confirmações: prioridade 1 = risk gate (se item bloqueado na queue)
+    #               prioridade 2 = recovery gate (se proposta pendente, sem bloqueio)
+    _is_confirm = c in _YES_WORDS | _NO_WORDS or raw.replace('"', "").strip().upper() == "YES I KNOW"
+    _is_recovery_word = c in _RECOVERY_APPROVE | _RECOVERY_REJECT
+    if _is_confirm or _is_recovery_word:
+        risk_blocked, _ = last_blocked()
+        if risk_blocked:
+            # Risk gate tem prioridade absoluta quando há item bloqueado
+            out = _handle_confirmation_v3(raw, skills, learn_state_fn)
+            if out is not None:
+                return out
+        else:
+            # Sem item bloqueado: verificar recovery pendente primeiro
+            proposal = get_pending_recovery()
+            if proposal and _is_recovery_word:
+                return _handle_recovery_confirmation(c, skills, learn_state_fn, proposal)
+            # Nenhum recovery pendente: fluxo normal (retorna "nao ha acao bloqueada")
+            if _is_confirm:
+                out = _handle_confirmation_v3(raw, skills, learn_state_fn)
+                if out is not None:
+                    return out
 
     # memory reset
     if c in ("limpar memoria", "limpar memória", "clear memory", "reset memory"):

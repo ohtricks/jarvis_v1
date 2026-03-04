@@ -9,7 +9,7 @@ from .planner import make_plan
 from .executor_llm import make_actions
 from .context_engine import update_context_state
 from .queue import enqueue_plan, clear_queue, has_active_queue
-from .executor import execute_until_blocked
+from .executor import execute_until_blocked, execute_until_blocked_or_recovery
 from .telemetry import start_debug_entry, debug_set, flush_debug_entry
 from .ux import ux_stage, ux_format_response
 
@@ -111,7 +111,14 @@ class JarvisAgent:
                 stages.append(ux_stage("enfileirando"))
                 stages.append(ux_stage("executando"))
 
-                run_out = execute_until_blocked(self.SKILLS, self._learn_state_from_action)
+                res = execute_until_blocked_or_recovery(self.SKILLS, self._learn_state_from_action, goal=goal)
+                run_out = res["message"]
+
+                if res["state"] == "recovery_pending":
+                    stages.append(ux_stage("recuperação", "aguardando aprovação"))
+                    if DEBUG:
+                        debug_set("ux_stages", stages)
+                    return remember(ux_format_response(stages, run_out, False))
 
                 blocked = has_active_queue()
                 if blocked:
@@ -144,7 +151,14 @@ class JarvisAgent:
                 stages.append(ux_stage("enfileirando"))
                 stages.append(ux_stage("executando"))
 
-                run_out = execute_until_blocked(self.SKILLS, self._learn_state_from_action)
+                res = execute_until_blocked_or_recovery(self.SKILLS, self._learn_state_from_action, goal=goal)
+                run_out = res["message"]
+
+                if res["state"] == "recovery_pending":
+                    stages.append(ux_stage("recuperação", "aguardando aprovação"))
+                    if DEBUG:
+                        debug_set("ux_stages", stages)
+                    return remember(ux_format_response(stages, run_out, False))
 
                 blocked = has_active_queue()
                 if blocked:

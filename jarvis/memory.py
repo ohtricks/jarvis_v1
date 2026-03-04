@@ -284,6 +284,30 @@ def clear_pending() -> None:
 
 
 # -------------------------
+# Pending recovery proposal (Fase 7)
+# Salvo em state["pending_recovery"] para não quebrar estrutura existente.
+# -------------------------
+def set_pending_recovery(proposal: dict | None) -> None:
+    mem = load_memory()
+    state = mem.get("state", {}) or {}
+    if proposal is None:
+        state.pop("pending_recovery", None)
+    else:
+        state["pending_recovery"] = proposal
+    mem["state"] = state
+    save_memory(mem)
+
+
+def get_pending_recovery() -> dict | None:
+    mem = load_memory()
+    return (mem.get("state", {}) or {}).get("pending_recovery")
+
+
+def clear_pending_recovery() -> None:
+    set_pending_recovery(None)
+
+
+# -------------------------
 # Reset
 # -------------------------
 def clear_memory() -> None:

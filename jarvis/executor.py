@@ -8,10 +8,13 @@ from .queue import (
     mark_done,
     mark_failed,
     mark_blocked,
+    list_items,
 )
 from .risk import require_confirmation, confirm_message
-from .memory import get_session
+from .memory import get_session, build_context, set_pending_recovery
 from .telemetry import debug_append
+from .observation import observe_step, should_propose_recovery
+from . import autonomy_safe
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
@@ -118,3 +121,64 @@ def execute_until_blocked(skills: dict, learn_state_fn, max_steps: int = 50) -> 
 # compat com comando antigo "executar tudo"
 def execute_all_until_blocked(skills: dict, learn_state_fn) -> str:
     return execute_until_blocked(skills, learn_state_fn)
+
+
+def execute_until_blocked_or_recovery(
+    skills: dict,
+    learn_state_fn,
+    goal: str = "",
+    max_steps: int = 50,
+) -> dict:
+    """
+    Como execute_until_blocked, mas ao detectar falha em run_shell:
+    - gera observation e verifica se deve propor recovery
+    - se sim: salva proposal, retorna {"state":"recovery_pending", "message":..., "proposal":...}
+    - se não: comportamento normal de falha
+
+    O executor NÃO executa o recovery plan. Só propõe.
+
+    Retorna sempre um dict:
+      {"state": str, "message": str, "proposal": dict | None}
+    """
+    outputs: list[str] = []
+    last_state = "empty"
+
+    for _ in range(max_steps):
+        msg, state = execute_one(skills, learn_state_fn)
+        last_state = state
+        if msg:
+            outputs.append(msg)
+
+        if state == "failed":
+            # Busca o item que falhou na queue para detalhes
+            failed_item: dict | None = None
+            for it in reversed(list_items()):
+                if it.get("status") == "failed":
+                    failed_item = it
+                    break
+
+            action = (failed_item.get("action") or "") if failed_item else ""
+            args = (failed_item.get("args") or {}) if failed_item else {}
+            error_out = (failed_item.get("error") or msg) if failed_item else msg
+
+            obs = observe_step(action, args, error_out, state)
+
+            if should_propose_recovery(obs):
+                context_text = build_context(max_turns=2)
+                proposal = autonomy_safe.propose_recovery(goal, obs, context_text)
+                set_pending_recovery(proposal)
+
+                # Outputs anteriores ao passo que falhou (contexto para o usuário)
+                prior = "\n".join([o for o in outputs[:-1] if o]).strip()
+                recovery_ux = autonomy_safe.format_recovery_message(msg, proposal)
+                full_ux = (prior + "\n\n" + recovery_ux).strip() if prior else recovery_ux
+
+                return {"state": "recovery_pending", "message": full_ux, "proposal": proposal}
+
+            break  # falha sem recovery → sai do loop normalmente
+
+        if state in ("empty", "blocked"):
+            break
+
+    out = "\n".join([o for o in outputs if o]).strip() or "Ok."
+    return {"state": last_state, "message": out, "proposal": None}
