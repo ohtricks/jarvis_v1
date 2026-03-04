@@ -6,7 +6,14 @@ from .memory import (
     get_session,
     get_pending_recovery,
     clear_pending_recovery,
+    get_pending_policy_proposal,
+    clear_pending_policy_proposal,
+    get_recent_execution,
+    get_pending_shell_allow_proposal,
+    clear_pending_shell_allow_proposal,
 )
+from .risk_policy import add_to_policy
+from .shell_policy import add_allow_prefix as _shell_add_allow_prefix
 from .queue import (
     format_queue_status,
     clear_queue,
@@ -20,6 +27,68 @@ from .queue import (
 from .executor import execute_next, execute_until_blocked, execute_all_until_blocked
 from .skills.registry import get_capabilities, get_capabilities_text
 
+# ── Policy proposal (risk_policy) ────────────────────────────────────────────
+# Mapeamento de palavra-chave do usuário para bucket no risk_policy.json
+_POLICY_BUCKET_MAP: dict[str, str] = {
+    "safe":    "safe_prefixes",
+    "risky":   "risky_patterns",
+    "risk":    "risky_patterns",
+    "danger":  "danger_patterns",
+    "perigoso": "danger_patterns",
+}
+_POLICY_BUCKET_LABEL: dict[str, str] = {
+    "safe_prefixes":   "seguro (safe) — executa sem confirmação",
+    "risky_patterns":  "risky — pede confirmação",
+    "danger_patterns": "danger — exige YES I KNOW",
+}
+
+
+def _extract_command_pattern(cmd: str) -> str:
+    """
+    Extrai até 2 tokens base de um comando, ignorando flags e argumentos.
+    Ex: "git commit -m 'msg'" → "git commit"
+        "git add ."           → "git add"
+        "npm install axios"   → "npm install"
+    """
+    tokens = cmd.strip().split()
+    base: list[str] = []
+    for token in tokens:
+        if token.startswith("-"):
+            break
+        base.append(token)
+        if len(base) >= 2:
+            break
+    return " ".join(base)
+
+
+def _handle_policy_proposal(c: str, proposal: dict) -> str | None:
+    """
+    Verifica se o input é uma ação de policy ("adicionar safe/risky/danger").
+    Retorna resposta string se processou, None caso contrário.
+    Não trata "cancelar" — deixa para os gates normais (risk/recovery).
+    """
+    for prefix in ("adicionar ", "add "):
+        if c.startswith(prefix):
+            rest = c[len(prefix):].strip()
+            bucket = _POLICY_BUCKET_MAP.get(rest)
+            if not bucket:
+                return None  # palavra não reconhecida como bucket, não interferir
+            cmd_pattern = _extract_command_pattern(proposal["command"])
+            if not cmd_pattern:
+                return "Nao consegui extrair o padrao do comando."
+            added = add_to_policy(bucket, cmd_pattern)
+            clear_pending_policy_proposal()
+            label = _POLICY_BUCKET_LABEL.get(bucket, bucket)
+            if added:
+                return (
+                    f"✅ '{cmd_pattern}' adicionado como {label}.\n"
+                    "Agora voce pode tentar novamente o comando."
+                )
+            return f"'{cmd_pattern}' ja existe em {label}."
+    return None
+
+
+# ── Risk / Confirmation words ────────────────────────────────────────────────
 _YES_WORDS = frozenset({
     "yes", "y", "confirmar",
     "sim", "s", "ok", "okay", "manda ver", "pode", "pode continuar", "vai", "confirmo",
@@ -111,7 +180,39 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
     raw = (cmd or "").strip()
     c = raw.lower()
 
-    # Confirmações: prioridade 1 = risk gate (se item bloqueado na queue)
+    # Prioridade 0: Policy proposal ("adicionar safe/risky/danger")
+    # Separado do risk gate e do recovery gate — altera ~/.jarvis/risk_policy.json.
+    pending_policy = get_pending_policy_proposal()
+    if pending_policy:
+        out = _handle_policy_proposal(c, pending_policy)
+        if out is not None:
+            return out
+
+    # Prioridade 0.5: Shell allow proposal ("permitir <prefix>") e cancelamento
+    pending_shell = get_pending_shell_allow_proposal()
+
+    if c.startswith("permitir "):
+        user_prefix = raw[len("permitir "):].strip()
+        if user_prefix:
+            _shell_add_allow_prefix(user_prefix)
+            clear_pending_shell_allow_proposal()
+            return f"Ok. '{user_prefix}' adicionado a allowlist. Tente novamente o comando."
+        elif pending_shell:
+            suggested = pending_shell.get("suggested_prefix", "")
+            if suggested:
+                _shell_add_allow_prefix(suggested)
+                clear_pending_shell_allow_proposal()
+                return f"Ok. '{suggested}' adicionado a allowlist. Tente novamente o comando."
+        return "Use: permitir <comando-base>  (ex: permitir git commit)"
+
+    # "cancelar" quando há proposta de shell pendente e sem item bloqueado no risk gate
+    if pending_shell and c in ("cancelar", "não", "nao", "n", "cancel"):
+        risk_b, _ = last_blocked()
+        if not risk_b:
+            clear_pending_shell_allow_proposal()
+            return "Ok, nao alterei a allowlist."
+
+    # Prioridade 1 = risk gate (se item bloqueado na queue)
     #               prioridade 2 = recovery gate (se proposta pendente, sem bloqueio)
     _is_confirm = c in _YES_WORDS | _NO_WORDS or raw.replace('"', "").strip().upper() == "YES I KNOW"
     _is_recovery_word = c in _RECOVERY_APPROVE | _RECOVERY_REJECT
@@ -210,6 +311,33 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
         if not has_active_queue():
             return "Não há fila ativa."
         return execute_next(skills, learn_state_fn)
+
+    # execution history (sem LLM — dados reais do executor)
+    if c in (
+        "ultimos comandos", "últimos comandos",
+        "history", "historico", "histórico",
+        "o que executou", "quais comandos executou",
+        "últimas execuções", "ultimas execucoes",
+        "o que voce executou", "o que você executou",
+    ):
+        history = get_recent_execution(limit=10)
+        if not history:
+            return "Nenhuma execucao registrada ainda nesta sessao."
+        lines = ["Últimas execuções:"]
+        for i, ev in enumerate(reversed(history), 1):
+            action = ev.get("action", "?")
+            ev_args = ev.get("args") or {}
+            status = ev.get("status", "?")
+            if action == "run_shell":
+                cmd_str = ev_args.get("command", "?")
+                lines.append(f"{i}) run_shell: {cmd_str}  [{status}]")
+            elif action == "open_app":
+                lines.append(f"{i}) open_app: {ev_args.get('app', '?')}  [{status}]")
+            elif action == "open_url":
+                lines.append(f"{i}) open_url: {ev_args.get('url', '?')}  [{status}]")
+            else:
+                lines.append(f"{i}) {action}  [{status}]")
+        return "\n".join(lines)
 
     # capability discovery
     if c in ("skills", "capabilities", "habilidades", "capacidades"):

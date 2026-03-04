@@ -284,6 +284,75 @@ def clear_pending() -> None:
 
 
 # -------------------------
+# Execution history (Fase 8A) — buffer de últimas execuções reais
+# Salvo em state["recent_execution"] (máx MAX_EXEC_HISTORY itens, FIFO).
+# -------------------------
+_MAX_EXEC_HISTORY = 50
+
+
+def append_execution(event: dict) -> None:
+    mem = load_memory()
+    state = mem.get("state", {}) or {}
+    history: list = state.get("recent_execution") or []
+    history.append(event)
+    state["recent_execution"] = history[-_MAX_EXEC_HISTORY:]
+    mem["state"] = state
+    save_memory(mem)
+
+
+def get_recent_execution(limit: int = 10) -> list[dict]:
+    state = load_memory().get("state", {}) or {}
+    history: list = state.get("recent_execution") or []
+    return history[-limit:]
+
+
+# -------------------------
+# Pending shell allow proposal (Fase 8B)
+# -------------------------
+def set_pending_shell_allow_proposal(proposal: dict | None) -> None:
+    mem = load_memory()
+    state = mem.get("state", {}) or {}
+    if proposal is None:
+        state.pop("pending_shell_allow_proposal", None)
+    else:
+        state["pending_shell_allow_proposal"] = proposal
+    mem["state"] = state
+    save_memory(mem)
+
+
+def get_pending_shell_allow_proposal() -> dict | None:
+    return (load_memory().get("state", {}) or {}).get("pending_shell_allow_proposal")
+
+
+def clear_pending_shell_allow_proposal() -> None:
+    set_pending_shell_allow_proposal(None)
+
+
+# -------------------------
+# Pending policy proposal (risk_policy — Fase 8)
+# Salvo em state["pending_policy_proposal"].
+# -------------------------
+def set_pending_policy_proposal(proposal: dict | None) -> None:
+    mem = load_memory()
+    state = mem.get("state", {}) or {}
+    if proposal is None:
+        state.pop("pending_policy_proposal", None)
+    else:
+        state["pending_policy_proposal"] = proposal
+    mem["state"] = state
+    save_memory(mem)
+
+
+def get_pending_policy_proposal() -> dict | None:
+    mem = load_memory()
+    return (mem.get("state", {}) or {}).get("pending_policy_proposal")
+
+
+def clear_pending_policy_proposal() -> None:
+    set_pending_policy_proposal(None)
+
+
+# -------------------------
 # Pending recovery proposal (Fase 7)
 # Salvo em state["pending_recovery"] para não quebrar estrutura existente.
 # -------------------------

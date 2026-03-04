@@ -1,97 +1,72 @@
 from typing import Tuple, Optional
+from . import risk_policy
 
 
-def classify_action_risk(action: str, args: dict) -> Tuple[str, str]:
+def classify_action_risk(action: str, args: dict) -> Tuple[str, str, str]:
+    """
+    Retorna (risk, note, matched) onde matched indica a fonte da classificação:
+      "fixed"          — open_app/open_url ou ação não run_shell
+      "safe_prefix"    — bateu em safe_prefixes
+      "danger_pattern" — bateu em danger_patterns
+      "risky_pattern"  — bateu em risky_patterns
+      "fallback"       — não bateu em nenhuma regra → risky por padrão
+
+    O campo matched é usado internamente para detectar se o usuário pode
+    querer adicionar esse comando às regras de policy.
+    """
     if action in ("open_app", "open_url"):
-        return "safe", ""
+        return "safe", "", "fixed"
 
     if action != "run_shell":
-        return "risky", "Ação não classificada."
+        return "risky", "Ação não classificada.", "fixed"
 
     cmd = (args.get("command") or "").strip()
     c = cmd.lower()
 
-    safe_prefixes = (
-        "pwd",
-        "ls",
-        "whoami",
-        "date",
-        "git status",
-        "git diff",
-        "git log",
-        "git branch",
-        "python --version",
-        "python3 --version",
-        "node -v",
-        "npm -v",
-        "yarn -v",
-        "pnpm -v",
-    )
+    policy = risk_policy.load_policy()
+    safe_prefixes   = policy["safe_prefixes"]
+    danger_patterns = policy["danger_patterns"]
+    risky_patterns  = policy["risky_patterns"]
+
     if any(c == p or c.startswith(p + " ") for p in safe_prefixes):
-        return "safe", ""
+        return "safe", "", "safe_prefix"
 
-    danger_patterns = [
-        "rm -rf",
-        "rm -fr",
-        "sudo ",
-        "dd ",
-        "mkfs",
-        "diskutil erase",
-        "shutdown",
-        "reboot",
-        ":(){ :|:& };:",
-        "chmod -r",
-        "chown -r",
-        ">/dev/sd",
-        " /dev/sd",
-    ]
     if any(p in c for p in danger_patterns):
-        return "danger", f"Comando potencialmente destrutivo: {cmd}"
+        return "danger", f"Comando potencialmente destrutivo: {cmd}", "danger_pattern"
 
-    risky_patterns = [
-        "git push",
-        "git reset --hard",
-        "git clean -fd",
-        "git clean -xdf",
-        "docker system prune",
-        "docker volume prune",
-        "docker image prune",
-        "npm install",
-        "pnpm install",
-        "yarn install",
-        "npm run",
-        "pnpm run",
-        "yarn run",
-        "pip install",
-        "pip3 install",
-        "composer install",
-        "composer update",
-        "brew install",
-        "brew upgrade",
-        "kill ",
-        "pkill ",
-    ]
     if any(p in c for p in risky_patterns):
-        return "risky", f"Comando com impacto: {cmd}"
+        return "risky", f"Comando com impacto: {cmd}", "risky_pattern"
 
-    return "risky", f"Confirmar execução: {cmd}"
+    return "risky", f"Confirmar execução: {cmd}", "fallback"
 
 
 def confirm_message(risk: str, note: str) -> str:
     if risk == "danger":
         return (
-            "⚠️ AÇÃO PERIGOSA detectada.\n"
+            "⚠️  AÇÃO PERIGOSA detectada.\n"
             f"{note}\n\n"
             "Para confirmar, digite exatamente: YES I KNOW\n"
-            "Para cancelar: jarvis no"
+            "Para cancelar: não"
         )
 
-    return (
-        "⚠️ Confirmação necessária.\n"
+    base = (
+        "⚠️  Confirmação necessária.\n"
         f"{note}\n\n"
-        "Para confirmar: jarvis yes\n"
-        "Para cancelar: jarvis no"
+        "Para confirmar: yes\n"
+        "Para cancelar: não"
     )
+
+    # Quando cai no fallback (não está em nenhuma regra conhecida), sugerir policy
+    if note.startswith("Confirmar execução:"):
+        base += (
+            "\n\n💡 Esse comando não está nas regras. Para adicionar e evitar "
+            "esta pergunta futuramente:\n"
+            "  adicionar safe   → executar sempre sem confirmação\n"
+            "  adicionar risky  → sempre pedir confirmação (padrão atual)\n"
+            "  adicionar danger → exigir YES I KNOW"
+        )
+
+    return base
 
 
 def require_confirmation(
@@ -100,19 +75,31 @@ def require_confirmation(
     desired_execute: bool,
 ) -> Tuple[bool, str, str, Optional[dict]]:
     """
-    V3 FIX:
-    - Se args['_execute'] == True, significa "já confirmado": NÃO bloqueia novamente.
-    - desired_execute continua existindo só para o executor decidir se executa de verdade
-      (mode dry/execute/safe). Não deve afetar o bypass da confirmação.
+    V3:
+    - Se args['_execute'] == True → já confirmado, não bloqueia.
+    - desired_execute existe para o executor, mas não afeta o bloqueio.
+    - Quando o comando cai no "fallback" (não está nas regras), salva
+      pending_policy_proposal em memory para o usuário poder adicionar às regras.
     """
     # ✅ bypass após confirmação
     if bool(args.get("_execute")) is True:
         return False, "safe", "", None
 
-    risk, note = classify_action_risk(action, args)
+    risk, note, matched = classify_action_risk(action, args)
 
     if risk == "safe":
         return False, "safe", "", None
+
+    # Fallback: comando não está em nenhuma regra → oferecer adição à policy
+    if action == "run_shell" and matched == "fallback":
+        cmd = (args.get("command") or "").strip()
+        from .memory import set_pending_policy_proposal
+        set_pending_policy_proposal({
+            "kind": "risk_policy_proposal",
+            "command": cmd,
+            "suggested_bucket": "risky_patterns",
+            "options": ["safe_prefixes", "risky_patterns", "danger_patterns"],
+        })
 
     required = "YES I KNOW" if risk == "danger" else "yes"
 

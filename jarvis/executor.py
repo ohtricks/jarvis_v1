@@ -11,7 +11,8 @@ from .queue import (
     list_items,
 )
 from .risk import require_confirmation, confirm_message
-from .memory import get_session, build_context, set_pending_recovery
+from datetime import datetime, timezone
+from .memory import get_session, build_context, set_pending_recovery, append_execution
 from .telemetry import debug_append
 from .observation import observe_step, should_propose_recovery
 from . import autonomy_safe
@@ -61,6 +62,8 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
     )
     if blocked:
         mark_blocked(idx, risk, note, confirm=confirm)
+        _ts = datetime.now(timezone.utc).isoformat()
+        append_execution({"ts": _ts, "action": action, "args": args, "status": "blocked", "output": note[:200]})
         if DEBUG:
             debug_append("execution", {"step": step_label, "action": action, "risk": risk, "status": "blocked", "output": note, "ms": int((time.time() - t0) * 1000)})
         return confirm_message(risk, note), "blocked"
@@ -83,12 +86,16 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
                 skill.execute = old_execute
 
         mark_done(idx, out)
+        _ts = datetime.now(timezone.utc).isoformat()
+        append_execution({"ts": _ts, "action": action, "args": args, "status": "done", "output": (out or "")[:200]})
         if DEBUG:
             debug_append("execution", {"step": step_label, "action": action, "risk": risk, "status": "done", "output": out, "ms": int((time.time() - t0) * 1000)})
         return out, "done"
 
     except Exception as e:
         mark_failed(idx, str(e))
+        _ts = datetime.now(timezone.utc).isoformat()
+        append_execution({"ts": _ts, "action": action, "args": args, "status": "failed", "output": str(e)[:200]})
         if DEBUG:
             debug_append("execution", {"step": step_label, "action": action, "risk": risk, "status": "failed", "output": str(e), "ms": int((time.time() - t0) * 1000)})
         return f"Erro ao executar ação: {e}", "failed"
