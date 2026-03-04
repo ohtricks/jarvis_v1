@@ -21,6 +21,7 @@ _DEFAULTS: dict = {
         "node -v", "npm -v", "yarn -v", "pnpm -v",
     ],
     "risky_patterns": [
+        "git push",
         "git reset --hard",
         "git clean -fd",
         "git clean -xdf",
