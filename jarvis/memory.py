@@ -116,9 +116,21 @@ def build_context(max_turns: int = 4) -> str:
             f"- cwd: {session.get('cwd')}"
         )
 
-    if state:
+    system_fields = {
+        k: state.get(k)
+        for k in ("cwd", "git_repo", "git_branch")
+        if state.get(k) is not None
+    }
+    if system_fields:
+        lines = ["SYSTEM:"]
+        for k, v in system_fields.items():
+            lines.append(f"- {k}: {v}")
+        parts.append("\n".join(lines))
+
+    state_extra = {k: v for k, v in state.items() if k not in ("cwd", "git_repo", "git_branch")}
+    if state_extra:
         lines = ["STATE:"]
-        for k, v in state.items():
+        for k, v in state_extra.items():
             lines.append(f"- {k}: {v}")
         parts.append("\n".join(lines))
 

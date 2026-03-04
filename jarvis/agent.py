@@ -7,6 +7,7 @@ from .commands import handle_builtin
 from .router import route_input, strip_forced_prefix
 from .planner import make_plan
 from .executor_llm import make_actions
+from .context_engine import update_context_state
 from .queue import enqueue_plan, clear_queue, has_active_queue
 from .executor import execute_until_blocked
 from .telemetry import start_debug_entry, debug_set, flush_debug_entry
@@ -66,6 +67,9 @@ class JarvisAgent:
             return resp
 
         try:
+            # captura contexto do sistema antes de tudo (silencioso em caso de erro)
+            update_context_state()
+
             # built-ins first (NO LLM)
             out = handle_builtin(user_input, self.SKILLS, self._learn_state_from_action)
             if out is not None:

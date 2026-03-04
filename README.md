@@ -15,9 +15,15 @@ User Input
      │
      ▼
 [Router LLM] ──────── fast_reply | executor | planner
-     │
+     │                    └── executor_model: "fast" | "brain"
      ▼
-[LLM] ─────────────── fast_reply | exec single-step | plan multi-step
+     ├── fast_reply ──────── responde direto (sem actions)
+     │
+     ├── executor ────────── Action Compiler (fast ou brain)
+     │   (≤ 3 steps)        compila 1-3 ações diretas sem reasoning
+     │
+     └── planner ─────────── Planner (reasoning)
+         (≤ 8 steps)         decomposição multi-step completa
      │
      ▼
 [Queue] ──────────── persiste etapas em ~/.jarvis/queue.json
@@ -33,6 +39,15 @@ User Input
      ▼
 [Memory] ─────────── salva estado + histórico (~/.jarvis/memory.json)
 ```
+
+### Hierarquia de modelos por rota
+
+| Rota | Modelo | Quando |
+|------|--------|--------|
+| `fast_reply` | — | Conversa, perguntas curtas (sem LLM extra) |
+| `executor` + `fast` | Haiku 4.5 | Ações diretas: abrir apps/urls, rodar comandos simples, 2-3 ações encadeadas |
+| `executor` + `brain` | Sonnet 4.6 | Pedidos com objetivo semântico: "me fale", "resuma", "liste", "extraia" |
+| `planner` | Sonnet 4.6 (reasoning) | Análise de código, refatoração, implementação, planos longos |
 
 ## Como executar
 
@@ -128,8 +143,8 @@ jarvis "o que você pode fazer?"
 
 | Prefixo | Rota | Comportamento |
 |---------|------|---------------|
-| `reason:` / `think:` / `plan:` | planner | Planejamento multi-step, executa até encontrar bloqueio |
-| `exec:` / `brain:` | executor | Execução single-step |
+| `reason:` / `think:` / `plan:` | planner | Planejamento multi-step completo via reasoning |
+| `exec:` / `brain:` | executor | Action Compiler com modelo fast (1-3 steps diretos) |
 | `fast:` | fast_reply | Resposta rápida, sem executar actions |
 
 ### Modos de execução
@@ -258,14 +273,15 @@ jarvis_v1/
     ├── main.py          # Entry point da CLI (flags --execute / --yes / --dry)
     ├── agent.py         # Orquestrador principal (decisão + execução)
     ├── llm.py           # Interface com o LLM via LiteLLM proxy
-    ├── router.py        # Classifica input: fast_reply | executor | planner
-    ├── planner.py       # Planejamento multi-step
-    ├── executor.py      # Engine de execução single-step (V3)
+    ├── router.py        # Classifica input: fast_reply | executor | planner + executor_model
+    ├── planner.py       # Planejamento multi-step (reasoning, até 8 steps)
+    ├── executor_llm.py  # Action Compiler: compila 1-3 ações diretas (fast ou brain)
+    ├── executor.py      # Engine de execução da fila (V3)
     ├── queue.py         # Gerenciamento da fila de tarefas
     ├── risk.py          # Classificação de risco (safe / risky / danger)
     ├── commands.py      # Comandos built-in (sem LLM)
     ├── memory.py        # Persistência de estado e histórico
-    ├── prompts.py       # System prompts do router e executor
+    ├── prompts.py       # System prompts: router, planner, action compiler
     ├── telemetry.py     # Logging de tokens e eventos
     ├── utils.py         # Utilitários (parse JSON, clean markdown)
     ├── brain.py         # (legado) interface antiga com LLM
@@ -283,9 +299,11 @@ jarvis_v1/
 
 | Role | Modelo padrão | Uso |
 |------|--------------|-----|
-| `fast` | Claude Haiku 4.5 | Router + respostas rápidas |
-| `brain` | Claude Sonnet 4.6 | Execução single-step |
-| `reasoning` | Claude Sonnet 4.6 (extended thinking, 8k tokens) | Planejamento multi-step |
+| `fast` | Claude Haiku 4.5 | Router + Action Compiler para pedidos diretos |
+| `brain` | Claude Sonnet 4.6 | Action Compiler para pedidos com objetivo semântico |
+| `reasoning` | Claude Sonnet 4.6 (extended thinking, 8k tokens) | Planner: análise, refatoração, planos longos |
+
+O router decide automaticamente qual modelo usar para cada pedido. `reasoning` só é acionado quando a tarefa realmente exige decomposição e análise profunda.
 
 Os modelos são definidos em [config.yaml](config.yaml) e podem ser trocados a qualquer momento.
 
