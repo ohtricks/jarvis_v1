@@ -59,18 +59,27 @@ Dado um pedido que normalmente é UMA ação, retorne:
 {"action":"git_commit","message":"fix shell_policy"}
 {"action":"git_push","remote":"origin","branch":"main"}
 {"action":"google_gmail_list_today","account":"default"}
-{"action":"google_gmail_list_unread","account":"default"}
-{"action":"google_gmail_search","account":"default","query":"from:alguem"}
-{"action":"google_gmail_get_latest","account":"default"}
+{"action":"google_gmail_list_today","account":"default","category":"primary"}
+{"action":"google_gmail_list_unread","account":"default","category":"promotions"}
+{"action":"google_gmail_search","account":"default","query":"from:alguem","category":"updates"}
+{"action":"google_gmail_get_latest","account":"default","category":"social"}
 {"action":"google_gmail_get_message","account":"default","message_id":"<id>"}
-{"action":"google_gmail_summarize_today","account":"default"}
-{"action":"google_gmail_summarize_unread","account":"default"}
+{"action":"google_gmail_summarize_today","account":"default","category":"primary"}
+{"action":"google_gmail_summarize_unread","account":"default","category":"forums"}
 {"action":"google_gmail_send_email","account":"default","to":"x@y.com","subject":"Oi","body":"..."}
 {"action":"google_gmail_reply","account":"default","message_id":"<id>","body":"..."}
 {"action":"google_gmail_mark_read","account":"default","message_id":"<id>"}
 {"action":"google_gmail_archive","account":"default","message_id":"<id>"}
 ou se for só conversa:
 {"action":"chat","response":"..."}
+
+Categorias Gmail (abas):
+- "principal", "importantes" → category="primary"
+- "promoções", "promocoes", "promoção" → category="promotions"
+- "social" → category="social"
+- "atualizações", "atualizacoes", "notificações" → category="updates"
+- "fóruns", "foruns" → category="forums"
+Quando detectar "aba X" ou menção de categoria, preencher args.category com o valor correto.
 """
 
 ACTION_COMPILER_PROMPT = """
@@ -84,13 +93,13 @@ Ações disponíveis:
 - git_add_all {cwd?}
 - git_commit {message, cwd?}
 - git_push {remote?, branch?}
-- google_gmail_list_today {account?, max?}
-- google_gmail_list_unread {account?, max?}
-- google_gmail_search {account?, query}
-- google_gmail_get_latest {account?}
+- google_gmail_list_today {account?, max?, period?, category?}
+- google_gmail_list_unread {account?, max?, category?}
+- google_gmail_search {account?, query?, max?, category?}
+- google_gmail_get_latest {account?, query?, category?}
 - google_gmail_get_message {account?, message_id}
-- google_gmail_summarize_today {account?}
-- google_gmail_summarize_unread {account?}
+- google_gmail_summarize_today {account?, max?, category?}
+- google_gmail_summarize_unread {account?, max?, category?}
 - google_gmail_summarize_thread {account?, thread_id}
 - google_gmail_send_email {account?, to, subject?, body}
 - google_gmail_reply {account?, message_id, body}
@@ -135,6 +144,16 @@ Gmail:
 - "marque como lido <id>" → {"action":"google_gmail_mark_read","account":"default","message_id":"<id>"}
 - "arquive <id>" → {"action":"google_gmail_archive","account":"default","message_id":"<id>"}
 - "da empresa" → account="empresa" | "pessoal" → account="pessoal"
+
+Categorias Gmail (abas) — preencher category= quando mencionadas:
+- "principal", "importantes", "aba principal" → category="primary"
+- "promoções", "promocoes", "promoção", "aba promoções" → category="promotions"
+- "social", "aba social" → category="social"
+- "atualizações", "atualizacoes", "notificações", "aba atualizações" → category="updates"
+- "fóruns", "foruns", "aba fóruns" → category="forums"
+Exemplos: "emails de hoje da aba principal" → list_today + category="primary"
+          "resuma promoções de hoje" → summarize_today + category="promotions"
+          "não lidos da aba social" → list_unread + category="social"
 
 Regras:
 - No máximo 4 passos no plan.

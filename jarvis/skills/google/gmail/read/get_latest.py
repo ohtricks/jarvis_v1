@@ -1,5 +1,5 @@
-    from ....base import Skill
-from .._common import not_authed_msg, get_alias
+from ....base import Skill
+from .._common import not_authed_msg, get_alias, normalize_category, build_query
 from .....integrations.google import gmail_api as _api
 
 
@@ -10,7 +10,14 @@ class GoogleGmailGetLatestSkill(Skill):
         alias = get_alias(args)
         if not _api.is_authed(alias):
             return not_authed_msg(alias)
-        query = args.get("query") or "in:inbox"
+
+        category, err = normalize_category(args.get("category"))
+        if err:
+            return err
+
+        user_query = (args.get("query") or "").strip() or None
+        query = build_query("", user_query, category, inbox_only=True)
+
         try:
             ids = _api.list_message_ids(alias, query, max_results=1)
             if not ids:

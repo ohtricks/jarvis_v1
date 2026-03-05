@@ -1,5 +1,6 @@
 """Helpers compartilhados pelas Google Gmail skills."""
 from ....integrations.google import gmail_api as _api
+from ....integrations.google.gmail_query import normalize_category, build_query
 
 
 def not_authed_msg(alias: str) -> str:
