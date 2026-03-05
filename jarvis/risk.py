@@ -23,8 +23,20 @@ def classify_action_risk(action: str, args: dict) -> Tuple[str, str, str]:
         "git_add_all":      ("risky",  "Vai adicionar todos os arquivos ao stage.",       "fixed"),
         "git_commit":       ("risky",  "Vai criar um commit no repositório.",             "fixed"),
         "git_push":         ("risky",  "Vai enviar commits para o repositório remoto.",   "fixed"),
-        # Gmail
-        "gmail_list_today": ("safe",   "",                                                "fixed"),
+        # Google Gmail — read/summarize (safe)
+        "google_gmail_list_today":       ("safe", "", "fixed"),
+        "google_gmail_list_unread":      ("safe", "", "fixed"),
+        "google_gmail_search":           ("safe", "", "fixed"),
+        "google_gmail_get_message":      ("safe", "", "fixed"),
+        "google_gmail_get_latest":       ("safe", "", "fixed"),
+        "google_gmail_summarize_today":  ("safe", "", "fixed"),
+        "google_gmail_summarize_unread": ("safe", "", "fixed"),
+        "google_gmail_summarize_thread": ("safe", "", "fixed"),
+        # Google Gmail — write/labels (risky)
+        "google_gmail_send_email": ("risky", "Vai enviar um email.",             "fixed"),
+        "google_gmail_reply":      ("risky", "Vai responder um email.",          "fixed"),
+        "google_gmail_mark_read":  ("risky", "Vai marcar email como lido.",      "fixed"),
+        "google_gmail_archive":    ("risky", "Vai arquivar email da caixa.",     "fixed"),
     }
     if action in _FIXED_SKILL_RISK:
         return _FIXED_SKILL_RISK[action]

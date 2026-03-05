@@ -12,11 +12,16 @@ import shutil
 from pathlib import Path
 
 from ..security import secure_prompt, is_sensitive_text
-from ..gmail_api import (
-    get_client_secret_path,
+from ..integrations.google.gmail_api import (
     gmail_auth_interactive,
-    _alias_dir,
+    NEW_CREDS_DIR,
+    normalize_alias,
 )
+from pathlib import Path as _Path
+
+
+def _alias_dir(alias: str) -> _Path:
+    return NEW_CREDS_DIR / normalize_alias(alias)
 
 _REQUIRED_FIELDS = {"client_id", "client_secret", "token_uri"}
 

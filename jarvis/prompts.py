@@ -15,7 +15,8 @@ Regras:
     • exemplos: "abra o chrome", "abra o chrome e o youtube", "rode git status e depois git diff", "commite com mensagem X", "commite e suba".
 - executor + executor_model="brain":
     • envolve objetivo semântico/contextual: "me fale", "resuma", "liste", "extraia", "compare", "o que chegou".
-    • exemplos: "abra o gmail e me fale os assuntos dos emails de hoje".
+    • gmail/email: qualquer ação de email (ler, listar, buscar, resumir, enviar, responder, arquivar) → executor+brain.
+    • exemplos: "abra o gmail e me fale os assuntos dos emails de hoje", "leia meus emails", "resuma os não lidos".
 - planner:
     • revisão/análise de código, refatoração, arquitetura, implementação, "faça um plano", "pesquise", "implemente X".
     • tarefas de decomposição real com muitos passos ou decisões encadeadas.
@@ -57,7 +58,17 @@ Dado um pedido que normalmente é UMA ação, retorne:
 {"action":"git_add_all"}
 {"action":"git_commit","message":"fix shell_policy"}
 {"action":"git_push","remote":"origin","branch":"main"}
-{"action":"gmail_list_today","account":"default","max_results":10}
+{"action":"google_gmail_list_today","account":"default"}
+{"action":"google_gmail_list_unread","account":"default"}
+{"action":"google_gmail_search","account":"default","query":"from:alguem"}
+{"action":"google_gmail_get_latest","account":"default"}
+{"action":"google_gmail_get_message","account":"default","message_id":"<id>"}
+{"action":"google_gmail_summarize_today","account":"default"}
+{"action":"google_gmail_summarize_unread","account":"default"}
+{"action":"google_gmail_send_email","account":"default","to":"x@y.com","subject":"Oi","body":"..."}
+{"action":"google_gmail_reply","account":"default","message_id":"<id>","body":"..."}
+{"action":"google_gmail_mark_read","account":"default","message_id":"<id>"}
+{"action":"google_gmail_archive","account":"default","message_id":"<id>"}
 ou se for só conversa:
 {"action":"chat","response":"..."}
 """
@@ -73,7 +84,18 @@ Ações disponíveis:
 - git_add_all {cwd?}
 - git_commit {message, cwd?}
 - git_push {remote?, branch?}
-- gmail_list_today {account?, max_results?}
+- google_gmail_list_today {account?, max?}
+- google_gmail_list_unread {account?, max?}
+- google_gmail_search {account?, query}
+- google_gmail_get_latest {account?}
+- google_gmail_get_message {account?, message_id}
+- google_gmail_summarize_today {account?}
+- google_gmail_summarize_unread {account?}
+- google_gmail_summarize_thread {account?, thread_id}
+- google_gmail_send_email {account?, to, subject?, body}
+- google_gmail_reply {account?, message_id, body}
+- google_gmail_mark_read {account?, message_id}
+- google_gmail_archive {account?, message_id}
 - chat {response}
 
 Retorne UMA das formas:
@@ -100,14 +122,25 @@ Git workflow:
 - Se mensagem do commit não estiver clara: {"action":"chat","response":"Qual mensagem do commit?"}
 
 Gmail:
-- "ler emails / últimos emails / ver inbox / gmail" → {"action":"gmail_list_today","account":"default"}
-- "últimos N emails" → {"action":"gmail_list_today","account":"default","max_results":N}
+- "emails de hoje / inbox / leia meus emails / últimos emails" → {"action":"google_gmail_list_today","account":"default"}
+- "emails não lidos / não li" → {"action":"google_gmail_list_unread","account":"default"}
+- "buscar email / pesquisar <termo>" → {"action":"google_gmail_search","account":"default","query":"<termo>"}
+- "último email / email mais recente" → {"action":"google_gmail_get_latest","account":"default"}
+- "ler email <id> / ver email <id>" → {"action":"google_gmail_get_message","account":"default","message_id":"<id>"}
+- "resuma emails de hoje / resumo do inbox" → {"action":"google_gmail_summarize_today","account":"default"}
+- "resuma não lidos / resumo dos não lidos" → {"action":"google_gmail_summarize_unread","account":"default"}
+- "resuma thread <id>" → {"action":"google_gmail_summarize_thread","account":"default","thread_id":"<id>"}
+- "envie email para X assunto Y" → {"action":"google_gmail_send_email","account":"default","to":"X","subject":"Y","body":"..."}
+- "responda email <id>" → {"action":"google_gmail_reply","account":"default","message_id":"<id>","body":"..."}
+- "marque como lido <id>" → {"action":"google_gmail_mark_read","account":"default","message_id":"<id>"}
+- "arquive <id>" → {"action":"google_gmail_archive","account":"default","message_id":"<id>"}
+- "da empresa" → account="empresa" | "pessoal" → account="pessoal"
 
 Regras:
 - No máximo 4 passos no plan.
 - Não invente skills além das listadas.
 - Use URLs completas com https://.
-- Se o pedido exigir skill inexistente (ex: acessar calendário, Google Drive), use chat explicando a limitação.
+- Se o pedido exigir skill inexistente (ex: calendário, Google Drive), use chat explicando a limitação.
 """
 
 def clean_json(text: str) -> str:

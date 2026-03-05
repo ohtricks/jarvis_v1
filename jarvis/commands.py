@@ -201,26 +201,54 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
         _success, msg = run_gmail_oauth_wizard(initial_alias=alias if alias != "default" else None)
         return msg
 
+    # ── Gmail: status de contas autenticadas ──────────────────────────────────
+    if c == "gmail status" or c.startswith("gmail status "):
+        alias = raw[len("gmail status"):].strip() or None
+        from .integrations.google import gmail_api as _gapi
+        if alias:
+            authed = _gapi.is_authed(alias)
+            return f"gmail '{alias}': {'✅ conectado' if authed else '❌ não conectado'}"
+        # Varrer os dois paths de credenciais
+        from pathlib import Path
+        dirs = []
+        for base in [_gapi.NEW_CREDS_DIR, _gapi.OLD_CREDS_DIR]:
+            if base.exists():
+                dirs += [d.name for d in base.iterdir() if d.is_dir() and (d / "token.json").exists()]
+        if not dirs:
+            return "Nenhuma conta Gmail conectada. Use: auth gmail"
+        return "Contas Gmail conectadas:\n" + "\n".join(f"  • {d}" for d in sorted(set(dirs)))
+
+    if c == "gmail accounts":
+        from pathlib import Path
+        from .integrations.google import gmail_api as _gapi
+        dirs = []
+        for base in [_gapi.NEW_CREDS_DIR, _gapi.OLD_CREDS_DIR]:
+            if base.exists():
+                dirs += [d.name for d in base.iterdir() if d.is_dir() and (d / "token.json").exists()]
+        if not dirs:
+            return "Nenhuma conta Gmail conectada. Use: auth gmail"
+        return "Contas Gmail conectadas:\n" + "\n".join(f"  • {d}" for d in sorted(set(dirs)))
+
     # ── Gmail: auto-wizard quando não autenticado ─────────────────────────────
     words = set(c.split())
     if _detect_gmail_read(words):
-        from .gmail_api import is_authenticated
+        from .integrations.google import gmail_api as _gapi
         alias = "default"
-        if not is_authenticated(alias):
+        if not _gapi.is_authed(alias):
             print("\nEu preciso acessar o Gmail. Iniciando configuração OAuth...\n", flush=True)
             from .wizards.gmail_oauth_wizard import run_gmail_oauth_wizard
             success, msg = run_gmail_oauth_wizard(initial_alias=None)
             if not success:
                 return msg
             # Auto-retry direto via skill (sem LLM)
-            if "gmail_list_today" in skills:
-                result = skills["gmail_list_today"].run({"account": alias})
+            if "google_gmail_list_today" in skills:
+                result = skills["google_gmail_list_today"].run({"account": alias})
                 return f"{msg}\n\nBuscando seus emails...\n\n{result}"
             return f"{msg}\n\nAgora você pode pedir novamente para listar seus emails."
         else:
             # Já autenticado: despacha direto para skill (sem LLM)
-            if "gmail_list_today" in skills:
-                return skills["gmail_list_today"].run({"account": alias})
+            if "google_gmail_list_today" in skills:
+                return skills["google_gmail_list_today"].run({"account": alias})
 
     # Prioridade 0: Policy proposal ("adicionar safe/risky/danger")
     # Separado do risk gate e do recovery gate — altera ~/.jarvis/risk_policy.json.

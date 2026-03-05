@@ -5,7 +5,18 @@ from .git.git_status import GitStatusSkill
 from .git.git_add_all import GitAddAllSkill
 from .git.git_commit import GitCommitSkill
 from .git.git_push import GitPushSkill
-from .gmail_list_today import GmailListTodaySkill
+from .google.gmail.read.list_today import GoogleGmailListTodaySkill
+from .google.gmail.read.list_unread import GoogleGmailListUnreadSkill
+from .google.gmail.read.search import GoogleGmailSearchSkill
+from .google.gmail.read.get_message import GoogleGmailGetMessageSkill
+from .google.gmail.read.get_latest import GoogleGmailGetLatestSkill
+from .google.gmail.threads.summarize_today import GoogleGmailSummarizeTodaySkill
+from .google.gmail.threads.summarize_unread import GoogleGmailSummarizeUnreadSkill
+from .google.gmail.threads.summarize_thread import GoogleGmailSummarizeThreadSkill
+from .google.gmail.write.send_email import GoogleGmailSendEmailSkill
+from .google.gmail.write.reply import GoogleGmailReplySkill
+from .google.gmail.labels.mark_read import GoogleGmailMarkReadSkill
+from .google.gmail.labels.archive import GoogleGmailArchiveSkill
 from .capabilities import Capability, format_capabilities_for_prompt
 
 
@@ -19,7 +30,22 @@ def build_skills(execute: bool = False):
         "git_add_all":      GitAddAllSkill(execute=execute),
         "git_commit":       GitCommitSkill(execute=execute),
         "git_push":         GitPushSkill(execute=execute),
-        "gmail_list_today": GmailListTodaySkill(),
+        # Google Gmail — read
+        "google_gmail_list_today":       GoogleGmailListTodaySkill(),
+        "google_gmail_list_unread":      GoogleGmailListUnreadSkill(),
+        "google_gmail_search":           GoogleGmailSearchSkill(),
+        "google_gmail_get_message":      GoogleGmailGetMessageSkill(),
+        "google_gmail_get_latest":       GoogleGmailGetLatestSkill(),
+        # Google Gmail — threads/summarize
+        "google_gmail_summarize_today":  GoogleGmailSummarizeTodaySkill(),
+        "google_gmail_summarize_unread": GoogleGmailSummarizeUnreadSkill(),
+        "google_gmail_summarize_thread": GoogleGmailSummarizeThreadSkill(),
+        # Google Gmail — write (risky)
+        "google_gmail_send_email":       GoogleGmailSendEmailSkill(execute=execute),
+        "google_gmail_reply":            GoogleGmailReplySkill(execute=execute),
+        # Google Gmail — labels (risky)
+        "google_gmail_mark_read":        GoogleGmailMarkReadSkill(execute=execute),
+        "google_gmail_archive":          GoogleGmailArchiveSkill(execute=execute),
     }
 
 
@@ -100,14 +126,114 @@ _CATALOG: list[Capability] = [
         examples=["sobe as mudanças", "push", "git push origin main"],
         risk="risky",
     ),
+    # ── Google Gmail ──────────────────────────────────────────────────────────
     Capability(
-        name="gmail_list_today",
-        namespace="gmail",
-        title="Listar emails recentes",
-        description="Lista os emails mais recentes da caixa de entrada do Gmail.",
-        args_schema={"account": "string?", "max_results": "integer?"},
-        examples=["leia meus emails", "últimos emails do gmail", "ver inbox"],
+        name="google_gmail_list_today",
+        namespace="google.gmail",
+        title="Listar emails de hoje",
+        description="Lista emails recentes da caixa de entrada (últimas 24h).",
+        args_schema={"account": "string?", "max": "integer?", "period": "string?"},
+        examples=["emails de hoje", "inbox do gmail", "leia meus emails"],
         risk="safe",
+    ),
+    Capability(
+        name="google_gmail_list_unread",
+        namespace="google.gmail",
+        title="Listar emails não lidos",
+        description="Lista emails não lidos da caixa de entrada.",
+        args_schema={"account": "string?", "max": "integer?"},
+        examples=["emails não lidos", "quantos emails não li", "inbox não lidos"],
+        risk="safe",
+    ),
+    Capability(
+        name="google_gmail_search",
+        namespace="google.gmail",
+        title="Buscar emails",
+        description="Busca emails com query no formato Gmail (from:, subject:, etc.).",
+        args_schema={"account": "string?", "query": "string", "max": "integer?"},
+        examples=["buscar email de fulano", "pesquisar assunto fatura"],
+        risk="safe",
+    ),
+    Capability(
+        name="google_gmail_get_message",
+        namespace="google.gmail",
+        title="Ler email por ID",
+        description="Lê o conteúdo completo de um email pelo ID.",
+        args_schema={"account": "string?", "message_id": "string"},
+        examples=["ler email <id>", "ver conteúdo do email"],
+        risk="safe",
+    ),
+    Capability(
+        name="google_gmail_get_latest",
+        namespace="google.gmail",
+        title="Último email recebido",
+        description="Lê o email mais recente da caixa de entrada.",
+        args_schema={"account": "string?", "query": "string?"},
+        examples=["último email", "email mais recente", "leia o último email"],
+        risk="safe",
+    ),
+    Capability(
+        name="google_gmail_summarize_today",
+        namespace="google.gmail",
+        title="Resumir emails de hoje",
+        description="Gera um resumo dos emails de hoje usando IA.",
+        args_schema={"account": "string?", "max": "integer?"},
+        examples=["resuma meus emails de hoje", "resumo do inbox"],
+        risk="safe",
+    ),
+    Capability(
+        name="google_gmail_summarize_unread",
+        namespace="google.gmail",
+        title="Resumir emails não lidos",
+        description="Gera um resumo dos emails não lidos usando IA.",
+        args_schema={"account": "string?", "max": "integer?"},
+        examples=["resuma os não lidos", "resumo dos emails não lidos"],
+        risk="safe",
+    ),
+    Capability(
+        name="google_gmail_summarize_thread",
+        namespace="google.gmail",
+        title="Resumir thread de email",
+        description="Gera um resumo de uma conversa (thread) de email.",
+        args_schema={"account": "string?", "thread_id": "string"},
+        examples=["resuma esse thread", "resumo da conversa de email"],
+        risk="safe",
+    ),
+    Capability(
+        name="google_gmail_send_email",
+        namespace="google.gmail",
+        title="Enviar email",
+        description="Envia um email. Requer confirmação (risky).",
+        args_schema={"account": "string?", "to": "string", "subject": "string?", "body": "string", "cc": "string?", "bcc": "string?"},
+        examples=["envie email para X", "mande email para fulano@empresa.com"],
+        risk="risky",
+    ),
+    Capability(
+        name="google_gmail_reply",
+        namespace="google.gmail",
+        title="Responder email",
+        description="Responde a um email pelo ID. Requer confirmação (risky).",
+        args_schema={"account": "string?", "message_id": "string", "body": "string", "reply_all": "boolean?"},
+        examples=["responda o email <id>", "reply para o último email"],
+        risk="risky",
+    ),
+    Capability(
+        name="google_gmail_mark_read",
+        namespace="google.gmail",
+        title="Marcar como lido",
+        description="Remove label UNREAD de um email. Requer confirmação (risky).",
+        args_schema={"account": "string?", "message_id": "string"},
+        examples=["marque como lido", "mark as read"],
+        risk="risky",
+    ),
+    Capability(
+        name="google_gmail_archive",
+        namespace="google.gmail",
+        title="Arquivar email",
+        description="Remove o email da caixa de entrada (archiva). Requer confirmação (risky).",
+        args_schema={"account": "string?", "message_id": "string"},
+        examples=["arquive o email", "archive este email"],
+        risk="risky",
     ),
 ]
 
