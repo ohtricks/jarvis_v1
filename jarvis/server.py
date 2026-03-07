@@ -14,18 +14,22 @@ from __future__ import annotations
 
 import os
 import secrets
+
+from dotenv import load_dotenv
+load_dotenv()  # carrega .env da raiz do projeto
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agent import JarvisAgent
+from . import voice as _voice
 from .memory import (
     get_pending_policy_proposal,
     get_pending_recovery,
@@ -271,6 +275,17 @@ async def skills(_: None = Depends(_verify_token)):
     return {"skills": sorted(_get_agent().SKILLS.keys())}
 
 
+@app.websocket("/api/voice")
+async def voice_ws(websocket: WebSocket):
+    """
+    WebSocket de voz — relay entre browser e Gemini Live API.
+
+    Browser envia chunks PCM 16-bit 16kHz (binário) ou JSON de controle.
+    Server retorna JSON: {type: audio|transcript|response_text|tool_result|blocked|done|error}
+    """
+    await _voice.handle_session(websocket, _get_agent())
+
+
 # ── Servir assets estáticos da UI (Tauri-ready) ───────────────────────────────
 
 _UI_DIST = Path(__file__).parent.parent / "ui" / "dist"
@@ -298,7 +313,8 @@ def _run_server():
         print(f"    Token:   desabilitado  (JARVIS_TOKEN_REQUIRED=1 para ativar)")
 
     print()
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    log_level = "debug" if os.getenv("JARVIS_DEBUG") == "1" else "info"
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level=log_level)
 
 
 if __name__ == "__main__":
