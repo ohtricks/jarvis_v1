@@ -44,36 +44,50 @@ logger = logging.getLogger(__name__)
 _GEMINI_MODEL_PREFERRED = "gemini-2.5-flash-native-audio-latest"
 _GEMINI_MODEL_FALLBACK  = "gemini-2.5-flash-native-audio-preview-12-2025"
 
-_SYSTEM_PROMPT = """\
-Você é o Jarvis, um assistente pessoal de IA para macOS.
+_SYSTEM_PROMPT_BASE = """\
+Você é J.A.R.V.I.S. — Just A Rather Very Intelligent System.
+Assistente pessoal de IA do seu criador, operando em macOS.
 
-IDIOMA OBRIGATÓRIO: Você DEVE escrever e pensar EXCLUSIVAMENTE em português brasileiro (pt-BR).
-Isso inclui TODO o seu raciocínio interno, planejamento, texto intermediário e respostas.
-NUNCA escreva em inglês — nem uma palavra. Todo texto visível deve ser em pt-BR.
+IDIOMA: português brasileiro (pt-BR) em todas as respostas e raciocínios.
+Sempre realize seu raciocínio interno (chain of thought) e sua resposta final exclusivamente em português do Brasil (PT-BR).
 
-Seja conciso e direto nas respostas.
-Não inicie a conversa com cumprimento automático — aguarde o usuário falar primeiro.
-Quando o usuário pedir para executar algo, use a ferramenta ask_jarvis.
-Quando o Jarvis retornar uma mensagem pedindo confirmação (risky/danger),
-informe o usuário claramente e aguarde a resposta dele antes de confirmar.
-Se o usuário confirmar ("sim", "pode ir", "yes"), chame ask_jarvis com o texto de confirmação.
-Se o usuário cancelar ("não", "cancela"), chame ask_jarvis com "não".
+PERSONALIDADE:
+- Tom formal, preciso e levemente britânico — como o J.A.R.V.I.S. do Homem de Ferro.
+- NUNCA cumprimente ou se apresente — vá direto ao ponto sempre.
+- Seja direto, elegante e inteligente. Nunca prolixo.
+- Demonstre iniciativa: se detectar algo relevante no contexto, mencione brevemente.
+- Humor seco e sofisticado quando apropriado — nunca forçado.
+- Confirme ações executadas com concisão: "Concluído, senhor." ou "Feito."
+- Ao receber bloqueio de risco, informe com clareza e aguarde confirmação do usuário.
+
+EXEMPLOS DE TOM:
+- "Já providenciei isso, senhor."
+- "Devo alertá-lo que essa ação requer confirmação."
+- "Prontamente, senhor."
+- "Identificado. Executando agora."
+
+FERRAMENTAS:
+- Use ask_jarvis para qualquer ação solicitada pelo usuário.
+- Se o retorno indicar confirmação necessária (risky/danger), informe o usuário e aguarde.
+- Confirmação do usuário ("sim", "pode", "confirmar") → chame ask_jarvis com esse texto.
+- Cancelamento ("não", "cancela") → chame ask_jarvis com "não".
 """
 
-# Texto de raciocínio interno do Gemini vaza como part.text antes da resposta real.
-# Filtramos apenas padrões em inglês que indicam meta-raciocínio de sistema (não conteúdo útil).
-# Raciocínio em pt-BR é mostrado normalmente no chat.
-_THINKING_PREFIXES = (
-    "crafting", "i'm ", "i am ", "let me", "i'll ", "i need to",
-    "composing", "formulating", "preparing", "i will", "initiating",
-    "i've ", "i have ", "to accomplish", "i should", "i can ",
-    "the user wants", "the user asked", "the user is",
-)
+_HISTORY_MAX_TURNS = 10  # turns a injetar no contexto de sessões novas
 
 
-def _is_thinking_text(text: str) -> bool:
-    lower = text.strip().lower()
-    return any(lower.startswith(p) for p in _THINKING_PREFIXES)
+def _build_system_prompt(history: list[dict]) -> str:
+    """Constrói o system prompt injetando o histórico recente da conversa."""
+    if not history:
+        return _SYSTEM_PROMPT_BASE
+
+    recent = history[-_HISTORY_MAX_TURNS:]
+    lines = ["\nCONTEXTO DA CONVERSA ANTERIOR (continue a partir daqui, sem cumprimentar):"]
+    for turn in recent:
+        role = "Usuário" if turn["role"] == "user" else "J.A.R.V.I.S."
+        lines.append(f"  {role}: {turn['text']}")
+
+    return _SYSTEM_PROMPT_BASE + "\n".join(lines) + "\n"
 
 _executor = ThreadPoolExecutor(max_workers=2)
 
@@ -154,16 +168,25 @@ async def handle_session(websocket: WebSocket, agent) -> None:
         http_options=types.HttpOptions(api_version="v1alpha"),
     )
     tools = build_voice_tools()
-    live_config = types.LiveConnectConfig(
-        response_modalities=["AUDIO"],
-        tools=tools,
-        system_instruction=_SYSTEM_PROMPT,
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede")
-            )
-        ),
-    )
+
+    def _make_config(history: list[dict]) -> types.LiveConnectConfig:
+        return types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            tools=tools,
+            system_instruction=_build_system_prompt(history),
+            # Habilita transcrição de input e output para popular o histórico
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon")
+                )
+            ),
+        )
+
+    # Histórico da conversa — persiste entre sessões Gemini na mesma conexão WS.
+    # Cada nova sessão injeta os turns anteriores no system prompt para dar continuidade.
+    conversation_history: list[dict] = []
 
     # Loop de sessões: cada clique no mic inicia uma nova sessão Gemini.
     # Quando o Gemini encerra (timeout ou limit), volta a aguardar áudio sem fechar o WS.
@@ -177,13 +200,18 @@ async def handle_session(websocket: WebSocket, agent) -> None:
             return  # browser fechou o WS
 
         session_count += 1
-        logger.info("[voice] Áudio recebido — iniciando sessão Gemini Live #%d", session_count)
+        logger.info("[voice] Áudio recebido — iniciando sessão Gemini Live #%d (histórico: %d turns)", session_count, len(conversation_history))
 
-        # Fase 2 — conecta ao Gemini Live e roda a sessão
+        # Fase 2 — conecta ao Gemini Live com contexto do histórico
+        if conversation_history:
+            for i, t in enumerate(conversation_history):
+                logger.info("[voice] history[%d] %s: %s", i, t["role"], t["text"][:80])
+
         model = _GEMINI_MODEL_PREFERRED
+        live_config = _make_config(conversation_history)
         try:
             async with client.aio.live.connect(model=model, config=live_config) as session:
-                await _run_session(websocket, session, agent, first_chunk=first_chunk)
+                await _run_session(websocket, session, agent, conversation_history, first_chunk=first_chunk)
             logger.info("[voice] Sessão Gemini #%d encerrada normalmente.", session_count)
         except Exception as e:
             err_msg = str(e)
@@ -191,7 +219,7 @@ async def handle_session(websocket: WebSocket, agent) -> None:
                 logger.warning("[voice] Modelo %s indisponível, tentando fallback %s", model, _GEMINI_MODEL_FALLBACK)
                 try:
                     async with client.aio.live.connect(model=_GEMINI_MODEL_FALLBACK, config=live_config) as session:
-                        await _run_session(websocket, session, agent, first_chunk=first_chunk)
+                        await _run_session(websocket, session, agent, conversation_history, first_chunk=first_chunk)
                     logger.info("[voice] Sessão fallback #%d encerrada normalmente.", session_count)
                 except WebSocketDisconnect:
                     return
@@ -204,8 +232,20 @@ async def handle_session(websocket: WebSocket, agent) -> None:
         # Continua o loop — aguarda próximo clique no mic
 
 
-async def _run_session(websocket: WebSocket, gemini_session, agent, first_chunk: bytes | None = None) -> None:
-    """Loop principal da sessão: recebe áudio do browser e processa respostas do Gemini."""
+async def _run_session(
+    websocket: WebSocket,
+    gemini_session,
+    agent,
+    history: list[dict],
+    first_chunk: bytes | None = None,
+) -> None:
+    """Loop principal da sessão: recebe áudio do browser e processa respostas do Gemini.
+
+    `history` é mutado in-place: turns desta sessão são acrescentados para
+    serem injetados como contexto na próxima sessão Gemini.
+    """
+    _pending_user_text: list[str] = []   # acumula transcrição do usuário até turn_complete
+    _pending_jarvis_text: list[str] = [] # acumula texto do Jarvis até turn_complete
 
     async def _receive_from_browser():
         """Task: lê mensagens do browser e envia ao Gemini."""
@@ -271,34 +311,53 @@ async def _run_session(websocket: WebSocket, gemini_session, agent, first_chunk:
         """Task: lê respostas do Gemini e despacha ao browser."""
         try:
             async for response in gemini_session.receive():
-                # Transcrição do input (fala do usuário)
                 if response.server_content:
                     sc = response.server_content
 
-                    # Texto de transcrição do input
-                    if hasattr(sc, "input_transcription") and sc.input_transcription:
-                        await _send_json(websocket, {
-                            "type": "transcript",
-                            "text": sc.input_transcription.text,
-                        })
+                    # Debug: mostra o que o Gemini está mandando
+                    logger.info(
+                        "[voice] sc: input_tr=%s output_tr=%s model_turn=%s turn_complete=%s",
+                        bool(sc.input_transcription and sc.input_transcription.text),
+                        bool(sc.output_transcription and sc.output_transcription.text),
+                        bool(sc.model_turn),
+                        sc.turn_complete,
+                    )
 
-                    # Partes de conteúdo (áudio ou texto da resposta)
+                    # Transcrição da fala do usuário — acumula, não envia por chunk
+                    if sc.input_transcription and sc.input_transcription.text:
+                        _pending_user_text.append(sc.input_transcription.text)
+
+                    # Transcrição do áudio do Jarvis — acumula, não envia por chunk
+                    if sc.output_transcription and sc.output_transcription.text:
+                        _pending_jarvis_text.append(sc.output_transcription.text)
+
+                    # Áudio da resposta — envia imediatamente (streaming de áudio é ok)
                     if sc.model_turn and sc.model_turn.parts:
                         for part in sc.model_turn.parts:
                             if part.inline_data and part.inline_data.data:
-                                # Áudio de resposta
                                 audio_b64 = base64.b64encode(part.inline_data.data).decode()
                                 await websocket.send_text(json.dumps({
                                     "type": "audio",
                                     "data": audio_b64,
                                 }))
-                            elif part.text and not _is_thinking_text(part.text):
-                                await _send_json(websocket, {
-                                    "type": "response_text",
-                                    "text": part.text,
-                                })
+                            elif part.text:
+                                # fallback: text parts sem output_audio_transcription
+                                _pending_jarvis_text.append(part.text)
 
                     if sc.turn_complete:
+                        # Envia textos completos de uma vez (sem parcelamento)
+                        if _pending_user_text:
+                            full_user = " ".join(_pending_user_text)
+                            await _send_json(websocket, {"type": "transcript", "text": full_user})
+                            history.append({"role": "user", "text": full_user})
+                            _pending_user_text.clear()
+
+                        if _pending_jarvis_text:
+                            full_jarvis = " ".join(_pending_jarvis_text)
+                            await _send_json(websocket, {"type": "response_text", "text": full_jarvis})
+                            history.append({"role": "assistant", "text": full_jarvis})
+                            _pending_jarvis_text.clear()
+
                         await _send_json(websocket, {"type": "done"})
 
                 # Tool call — Gemini quer executar ask_jarvis
