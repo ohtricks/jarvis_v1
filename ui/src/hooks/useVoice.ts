@@ -22,15 +22,38 @@ export interface BlockedInfo {
   suggestions: string[];
 }
 
-const WS_URL     = 'ws://127.0.0.1:8899/api/voice';
-const STATUS_URL = 'http://127.0.0.1:8899/api/status';
+export interface QueueData {
+  total: number;
+  pending: number;
+  running: number;
+  blocked: number;
+  done: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface HistoryItem {
+  ts: string;
+  action: string;
+  args: Record<string, unknown>;
+  status: 'done' | 'failed' | 'blocked';
+  output: string;
+}
+
+const WS_URL      = 'ws://127.0.0.1:8899/api/voice';
+const STATUS_URL  = 'http://127.0.0.1:8899/api/status';
+const SKILLS_URL  = 'http://127.0.0.1:8899/api/skills';
+const HISTORY_URL = 'http://127.0.0.1:8899/api/history';
 
 export function useVoice() {
-  const [status,     setStatus]     = useState<VoiceStatus>('disconnected');
-  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
-  const [blocked,    setBlocked]    = useState<BlockedInfo | null>(null);
-  const [mode,       setMode]       = useState<'dry' | 'execute'>('dry');
-  const [error,      setError]      = useState<string | null>(null);
+  const [status,       setStatus]       = useState<VoiceStatus>('disconnected');
+  const [transcript,   setTranscript]   = useState<TranscriptEntry[]>([]);
+  const [blocked,      setBlocked]      = useState<BlockedInfo | null>(null);
+  const [mode,         setMode]         = useState<'dry' | 'execute'>('dry');
+  const [error,        setError]        = useState<string | null>(null);
+  const [queueData,    setQueueData]    = useState<QueueData | null>(null);
+  const [skills,       setSkills]       = useState<string[]>([]);
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
 
   const wsRef            = useRef<WebSocket | null>(null);
   const captureCtxRef    = useRef<AudioContext | null>(null);
@@ -41,6 +64,7 @@ export function useVoice() {
   const sourceRef        = useRef<MediaStreamAudioSourceNode | null>(null);
   const isCapturingRef   = useRef<boolean>(false);
   const speakTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRef          = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -100,6 +124,29 @@ export function useVoice() {
       console.error('Audio playback error:', e);
     }
   }, [ensurePlayback]);
+
+  // ── polling status ────────────────────────────────────────────────────────
+
+  const _stopPoll = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  const _startPoll = useCallback(() => {
+    _stopPoll();
+    const fetchStatus = async () => {
+      try {
+        const res  = await fetch(STATUS_URL);
+        const data = await res.json();
+        setMode(data.mode === 'execute' ? 'execute' : 'dry');
+        if (data.queue) setQueueData(data.queue as QueueData);
+      } catch { /* server may be busy */ }
+    };
+    fetchStatus();
+    pollRef.current = setInterval(fetchStatus, 3000);
+  }, [_stopPoll]);
 
   // ── WebSocket message handler ─────────────────────────────────────────────
 
@@ -165,30 +212,35 @@ export function useVoice() {
     setStatus('connecting');
     setError(null);
 
-    // Fetch current mode from server
+    // Fetch skills once
     try {
-      const res  = await fetch(STATUS_URL);
+      const res  = await fetch(SKILLS_URL);
       const data = await res.json();
-      setMode(data.mode === 'execute' ? 'execute' : 'dry');
-    } catch { /* server may not be running yet */ }
+      setSkills(data.skills ?? []);
+    } catch { /* ignore */ }
+
+    // Start polling /api/status for mode + queue
+    _startPoll();
 
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen    = () => { setStatus('idle'); addEntry('system', 'Conectado.'); };
-    ws.onclose   = () => { setStatus('disconnected'); stopCapture(); };
+    ws.onclose   = () => { setStatus('disconnected'); stopCapture(); _stopPoll(); };
     ws.onerror   = () => {
       setError('Não foi possível conectar. Verifique se o server Jarvis está rodando em :8899.');
       setStatus('disconnected');
+      _stopPoll();
     };
     ws.onmessage = handleMessage;
-  }, [addEntry, handleMessage, stopCapture]);
+  }, [addEntry, handleMessage, stopCapture, _startPoll, _stopPoll]);
 
   const disconnect = useCallback(() => {
+    _stopPoll();
     stopCapture();
     wsRef.current?.close();
     wsRef.current = null;
-  }, [stopCapture]);
+  }, [stopCapture, _stopPoll]);
 
   const startListening = useCallback(async () => {
     if (isCapturingRef.current) return;
@@ -266,17 +318,29 @@ export function useVoice() {
     setStatus('processing');
   }, [addEntry]);
 
+  const refreshHistory = useCallback(async () => {
+    try {
+      const res  = await fetch(HISTORY_URL);
+      const data = await res.json();
+      setHistoryItems(data.items ?? []);
+    } catch { /* ignore */ }
+  }, []);
+
   return {
     status,
     transcript,
     blocked,
     mode,
     error,
+    queueData,
+    skills,
+    historyItems,
     connect,
     disconnect,
     startListening,
     stopListening,
     sendConfirmation,
+    refreshHistory,
     clearError: () => setError(null),
   };
 }

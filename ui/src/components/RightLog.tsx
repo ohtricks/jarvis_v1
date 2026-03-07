@@ -1,13 +1,19 @@
-import { useEffect, useRef } from 'react';
-import { TranscriptEntry } from '../hooks/useVoice';
+import { useEffect, useRef, useState } from 'react';
+import { TranscriptEntry, HistoryItem } from '../hooks/useVoice';
+
+// ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtTime(d: Date) {
-  return d.toLocaleTimeString('pt-BR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
+
+function fmtHistTime(iso: string) {
+  try {
+    return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch { return iso; }
+}
+
+// ── Session entries ───────────────────────────────────────────────────────────
 
 const ROLE_LABEL: Record<TranscriptEntry['role'], string> = {
   user:      'você',
@@ -28,7 +34,33 @@ function MessageEntry({ entry }: { entry: TranscriptEntry }) {
   );
 }
 
-function EmptyState() {
+// ── History entries ───────────────────────────────────────────────────────────
+
+const STATUS_LABEL: Record<string, string> = {
+  done:    'concluído',
+  failed:  'falhou',
+  blocked: 'bloqueado',
+};
+
+function HistoryEntry({ item }: { item: HistoryItem }) {
+  return (
+    <div className={`hist-entry ${item.status}`}>
+      <div className="hist-meta">
+        <span className={`hist-dot ${item.status}`} />
+        <span className="hist-action">{item.action}</span>
+        <span className="hist-status-label">{STATUS_LABEL[item.status] ?? item.status}</span>
+        <span className="hist-time">{fmtHistTime(item.ts)}</span>
+      </div>
+      {item.output && (
+        <div className="hist-output">{item.output}</div>
+      )}
+    </div>
+  );
+}
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+
+function EmptyState({ text = 'nenhuma conversa' }: { text?: string }) {
   return (
     <div className="log-empty">
       <div className="log-empty-icon">
@@ -39,36 +71,94 @@ function EmptyState() {
           <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
       </div>
-      <span className="log-empty-text">nenhuma conversa</span>
+      <span className="log-empty-text">{text}</span>
     </div>
   );
 }
 
-interface Props {
-  entries: TranscriptEntry[];
+// ── Icons ─────────────────────────────────────────────────────────────────────
+
+function IconChat() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
 }
 
-export function RightLog({ entries }: Props) {
+function IconHistory() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="12 8 12 12 14 14" />
+      <path d="M3.05 11a9 9 0 1 0 .5-3.5" />
+      <polyline points="3 4 3 11 10 11" />
+    </svg>
+  );
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+type Tab = 'session' | 'history';
+
+interface Props {
+  entries: TranscriptEntry[];
+  historyItems: HistoryItem[];
+  onRefreshHistory: () => void;
+}
+
+export function RightLog({ entries, historyItems, onRefreshHistory }: Props) {
+  const [tab, setTab] = useState<Tab>('session');
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll quando novas mensagens chegam na aba sessão
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [entries]);
+    if (tab === 'session') {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [entries, tab]);
+
+  const handleTabChange = (t: Tab) => {
+    setTab(t);
+    if (t === 'history') onRefreshHistory();
+  };
+
+  const count = tab === 'session'
+    ? (entries.length > 0 ? `${entries.length} msg` : '—')
+    : (historyItems.length > 0 ? `${historyItems.length}` : '—');
 
   return (
     <aside className="log-panel">
-      <div className="log-header">
-        <span className="log-header-title">sessão</span>
-        <span className="log-header-count">
-          {entries.length > 0 ? `${entries.length} msg` : '—'}
-        </span>
+      {/* Tabs */}
+      <div className="log-tabs">
+        <button
+          className={`log-tab ${tab === 'session' ? 'active' : ''}`}
+          onClick={() => handleTabChange('session')}
+        >
+          <IconChat />
+          sessão
+        </button>
+        <button
+          className={`log-tab ${tab === 'history' ? 'active' : ''}`}
+          onClick={() => handleTabChange('history')}
+        >
+          <IconHistory />
+          histórico
+        </button>
+        <span className="log-tab-count">{count}</span>
       </div>
 
+      {/* Content */}
       <div className="log-scroll">
-        {entries.length === 0 ? (
-          <EmptyState />
+        {tab === 'session' ? (
+          entries.length === 0
+            ? <EmptyState />
+            : entries.map(e => <MessageEntry key={e.id} entry={e} />)
         ) : (
-          entries.map(e => <MessageEntry key={e.id} entry={e} />)
+          historyItems.length === 0
+            ? <EmptyState text="nenhum histórico" />
+            : historyItems.map((item, i) => <HistoryEntry key={i} item={item} />)
         )}
         <div ref={bottomRef} />
       </div>

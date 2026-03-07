@@ -269,6 +269,8 @@ body::before {
 .sidebar-section:last-child { border-bottom: none; }
 
 .sidebar-section-title {
+  display: flex;
+  align-items: center;
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 500;
@@ -1026,26 +1028,45 @@ body::before {
   background: var(--bg-deep);
 }
 
-.log-header {
+/* Tabs bar */
+.log-tabs {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 18px;
+  gap: 2px;
+  padding: 0 10px;
   height: 40px;
   border-bottom: 1px solid var(--rim);
 }
 
-.log-header-title {
+.log-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  height: 28px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--t3);
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 500;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--t3);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
 }
 
-.log-header-count {
+.log-tab:hover { color: var(--t2); background: var(--bg-hover); }
+
+.log-tab.active {
+  color: var(--cyan);
+  background: var(--cyan-dim);
+}
+
+.log-tab-count {
+  margin-left: auto;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--t3);
@@ -1250,3 +1271,119 @@ body::before {
 ::-webkit-scrollbar { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--t3); border-radius: 2px; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SIDEBAR — Fila de tarefas (dados reais)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.sidebar-section-badge {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--cyan-text);
+  background: var(--cyan-dim);
+  border-radius: 8px;
+  padding: 1px 6px;
+  letter-spacing: 0.04em;
+}
+
+.sidebar-queue-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sidebar-queue-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--t2);
+  letter-spacing: 0.04em;
+}
+
+.sidebar-queue-row span:last-child {
+  font-weight: 600;
+  color: var(--t1);
+}
+
+.sidebar-queue-row.running span:first-child { color: var(--cyan); }
+.sidebar-queue-row.blocked span:first-child { color: var(--amber); }
+.sidebar-queue-row.done    span:first-child { color: var(--mint); }
+.sidebar-queue-row.failed  span:first-child { color: var(--rose); }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   RIGHT LOG — Histórico de execuções
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.hist-entry {
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--rim);
+  animation: msg-in 0.22s ease-out both;
+  transition: background 0.12s;
+}
+
+.hist-entry:hover { background: rgba(255,255,255,0.018); }
+.hist-entry:last-child { border-bottom: none; }
+
+.hist-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hist-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hist-dot.done    { background: var(--mint); box-shadow: 0 0 5px rgba(0,229,160,0.5); }
+.hist-dot.failed  { background: var(--rose); box-shadow: 0 0 5px rgba(255,95,126,0.5); }
+.hist-dot.blocked { background: var(--amber); box-shadow: 0 0 5px rgba(240,160,32,0.5); }
+
+.hist-action {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--t1);
+  letter-spacing: 0.04em;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hist-status-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.hist-entry.done    .hist-status-label { color: var(--mint); }
+.hist-entry.failed  .hist-status-label { color: var(--rose); }
+.hist-entry.blocked .hist-status-label { color: var(--amber); }
+
+.hist-time {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--t3);
+  flex-shrink: 0;
+}
+
+.hist-output {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--t2);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  opacity: 0.8;
+}

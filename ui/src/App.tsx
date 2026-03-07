@@ -29,11 +29,15 @@ export default function App() {
     blocked,
     mode,
     error,
+    queueData,
+    skills,
+    historyItems,
     connect,
     disconnect,
     startListening,
     stopListening,
     sendConfirmation,
+    refreshHistory,
     clearError,
   } = useVoice();
 
@@ -79,7 +83,7 @@ export default function App() {
 
       {/* ── 3-Column Body ── */}
       <div className="app-body">
-        <LeftSidebar status={status} mode={mode} />
+        <LeftSidebar status={status} mode={mode} queueData={queueData} skills={skills} />
 
         <CenterStage
           status={status}
@@ -91,7 +95,7 @@ export default function App() {
           onDisconnect={disconnect}
         />
 
-        <RightLog entries={transcript} />
+        <RightLog entries={transcript} historyItems={historyItems} onRefreshHistory={refreshHistory} />
       </div>
 
     </div>
