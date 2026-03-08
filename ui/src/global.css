@@ -516,20 +516,14 @@ body::before {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 320px;
-  height: 320px;
+  width: 380px;
+  height: 380px;
   flex-shrink: 0;
 }
 
-/* Layer 1 — Halo externo difuso */
+/* Layer 1 — Halo externo (removido — canvas cuida do glow) */
 .orb2-halo {
-  position: absolute;
-  inset: -40px;
-  border-radius: 50%;
-  filter: blur(50px);
-  pointer-events: none;
-  transition: background 0.8s ease;
-  animation: orb2-halo-breathe 7s ease-in-out infinite;
+  display: none;
 }
 
 /* Layer 2 — Pulse anchor: 192×192 centered → ondas partem do raio da nuvem */

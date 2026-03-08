@@ -66,26 +66,20 @@ export function OrbCore({ state, intensity = 0.5, audioLevel = 0 }: OrbCoreProps
         '--orb-audio-level': audioLevel,
       } as React.CSSProperties}
     >
-      {/* Layer 1 — Halo externo difuso */}
-      <div
-        className="orb2-halo"
-        style={{ background: `radial-gradient(circle at center, ${cfg.glowColor} 0%, transparent 68%)` }}
-      />
+      {/* Layer 1 — Nuvem de partículas (a orbe em si) */}
+      <OrbParticles state={state} audioLevel={audioLevel} />
 
       {/* Layer 2 — Ondas radiais de emissão (só speaking) */}
       <div className="orb2-pulse-anchor">
         <OrbPulse active={cfg.pulseActive} color={cfg.pulseColor} />
       </div>
 
-      {/* Layer 3 — Nuvem de partículas (a orbe em si) */}
-      <OrbParticles state={state} audioLevel={audioLevel} />
-
-      {/* Layer 4 — Anéis orbitais SVG */}
+      {/* Layer 3 — Anéis orbitais SVG */}
       <div className="orb2-rings-wrap">
         <OrbRings state={state} ringSpeed={cfg.ringSpeed * speedMult} />
       </div>
 
-      {/* Layer 6 — Caption */}
+      {/* Layer 4 — Caption */}
       <span className="orb2-caption">{STATUS_CAPTION[state]}</span>
     </div>
   );
