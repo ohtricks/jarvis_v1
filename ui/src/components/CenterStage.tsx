@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { VoiceStatus, BlockedInfo } from '../hooks/useVoice';
 import { VoiceOrb } from './VoiceOrb';
 import { ControlBar } from './ControlBar';
@@ -10,6 +11,11 @@ function btnClass(s: string): string {
   if (l === 'não' || l === 'cancelar' || l === 'n') return 'blocked-btn cancel';
   return 'blocked-btn neutral';
 }
+
+const DEBUG_STATES: VoiceStatus[] = ['idle', 'listening', 'processing', 'speaking'];
+const DEBUG_LABELS: Record<string, string> = {
+  idle: 'idle', listening: 'listen', processing: 'think', speaking: 'speak',
+};
 
 interface Props {
   status: VoiceStatus;
@@ -31,13 +37,15 @@ export function CenterStage({
   onDisconnect,
 }: Props) {
   const isConnected = status !== 'disconnected' && status !== 'connecting';
+  const [debugState, setDebugState] = useState<VoiceStatus | null>(null);
+  const effectiveStatus = debugState ?? status;
 
   return (
     <main className="stage">
       <div className="stage-inner">
 
         {/* Orb */}
-        <VoiceOrb status={status} />
+        <VoiceOrb status={effectiveStatus} />
 
         {/* Controls */}
         <ControlBar
@@ -72,6 +80,27 @@ export function CenterStage({
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Dev: state switcher */}
+        {import.meta.env.DEV && (
+          <div className="orb-debug-bar">
+            <button
+              className={`orb-debug-btn ${debugState === null ? 'active' : ''}`}
+              onClick={() => setDebugState(null)}
+            >
+              live
+            </button>
+            {DEBUG_STATES.map(s => (
+              <button
+                key={s}
+                className={`orb-debug-btn ${debugState === s ? 'active' : ''}`}
+                onClick={() => setDebugState(debugState === s ? null : s)}
+              >
+                {DEBUG_LABELS[s]}
+              </button>
+            ))}
           </div>
         )}
 
