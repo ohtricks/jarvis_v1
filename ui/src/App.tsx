@@ -32,6 +32,7 @@ export default function App() {
     queueData,
     skills,
     historyItems,
+    metrics,
     connect,
     disconnect,
     startListening,
@@ -83,7 +84,7 @@ export default function App() {
 
       {/* ── 3-Column Body ── */}
       <div className="app-body">
-        <LeftSidebar status={status} mode={mode} queueData={queueData} skills={skills} />
+        <LeftSidebar status={status} mode={mode} queueData={queueData} skills={skills} metrics={metrics} />
 
         <CenterStage
           status={status}

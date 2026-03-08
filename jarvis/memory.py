@@ -307,6 +307,22 @@ def get_recent_execution(limit: int = 10) -> list[dict]:
 
 
 # -------------------------
+# LLM latency (último tempo de execução do agent)
+# -------------------------
+
+def set_last_llm_ms(ms: int) -> None:
+    mem = load_memory()
+    state = mem.get("state", {}) or {}
+    state["last_llm_ms"] = ms
+    mem["state"] = state
+    save_memory(mem)
+
+
+def get_last_llm_ms() -> int | None:
+    return (load_memory().get("state", {}) or {}).get("last_llm_ms")
+
+
+# -------------------------
 # Pending shell allow proposal (Fase 8B)
 # -------------------------
 def set_pending_shell_allow_proposal(proposal: dict | None) -> None:

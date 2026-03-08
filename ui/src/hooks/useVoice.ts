@@ -40,6 +40,13 @@ export interface HistoryItem {
   output: string;
 }
 
+export interface SystemMetrics {
+  cpu: number | null;
+  ram: number | null;
+  wsPing: number | null;
+  llmMs: number | null;
+}
+
 const WS_URL      = 'ws://127.0.0.1:8899/api/voice';
 const STATUS_URL  = 'http://127.0.0.1:8899/api/status';
 const SKILLS_URL  = 'http://127.0.0.1:8899/api/skills';
@@ -54,6 +61,7 @@ export function useVoice() {
   const [queueData,    setQueueData]    = useState<QueueData | null>(null);
   const [skills,       setSkills]       = useState<string[]>([]);
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [metrics,      setMetrics]      = useState<SystemMetrics>({ cpu: null, ram: null, wsPing: null, llmMs: null });
 
   const wsRef            = useRef<WebSocket | null>(null);
   const captureCtxRef    = useRef<AudioContext | null>(null);
@@ -65,6 +73,7 @@ export function useVoice() {
   const isCapturingRef   = useRef<boolean>(false);
   const speakTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollRef          = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pingIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -125,13 +134,10 @@ export function useVoice() {
     }
   }, [ensurePlayback]);
 
-  // ── polling status ────────────────────────────────────────────────────────
+  // ── polling status (cpu/ram/queue/llm) ───────────────────────────────────
 
   const _stopPoll = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }, []);
 
   const _startPoll = useCallback(() => {
@@ -142,11 +148,34 @@ export function useVoice() {
         const data = await res.json();
         setMode(data.mode === 'execute' ? 'execute' : 'dry');
         if (data.queue) setQueueData(data.queue as QueueData);
+        setMetrics(prev => ({
+          ...prev,
+          cpu:   typeof data.cpu   === 'number' ? Math.round(data.cpu)   : prev.cpu,
+          ram:   typeof data.ram   === 'number' ? Math.round(data.ram)   : prev.ram,
+          llmMs: typeof data.last_llm_ms === 'number' ? data.last_llm_ms : prev.llmMs,
+        }));
       } catch { /* server may be busy */ }
     };
     fetchStatus();
     pollRef.current = setInterval(fetchStatus, 3000);
   }, [_stopPoll]);
+
+  // ── WebSocket ping ────────────────────────────────────────────────────────
+
+  const _stopPing = useCallback(() => {
+    if (pingIntervalRef.current) { clearInterval(pingIntervalRef.current); pingIntervalRef.current = null; }
+  }, []);
+
+  const _startPing = useCallback(() => {
+    _stopPing();
+    const sendPing = () => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+    };
+    sendPing();
+    pingIntervalRef.current = setInterval(sendPing, 5000);
+  }, [_stopPing]);
 
   // ── WebSocket message handler ─────────────────────────────────────────────
 
@@ -174,6 +203,11 @@ export function useVoice() {
             blocked_note: msg.blocked_note ?? null,
             suggestions:  msg.suggestions  ?? [],
           });
+          break;
+        case 'pong':
+          if (typeof msg.ts === 'number') {
+            setMetrics(prev => ({ ...prev, wsPing: Date.now() - msg.ts }));
+          }
           break;
         case 'done': {
           const c = playbackCtxRef.current;
@@ -219,33 +253,43 @@ export function useVoice() {
       setSkills(data.skills ?? []);
     } catch { /* ignore */ }
 
-    // Start polling /api/status for mode + queue
+    // Start polling /api/status for mode + queue + cpu/ram/llm
     _startPoll();
 
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
-    ws.onopen    = () => { setStatus('idle'); addEntry('system', 'Conectado.'); };
-    ws.onclose   = () => { setStatus('disconnected'); stopCapture(); _stopPoll(); };
+    ws.onopen    = () => {
+      setStatus('idle');
+      addEntry('system', 'Conectado.');
+      _startPing();
+    };
+    ws.onclose   = () => {
+      setStatus('disconnected');
+      stopCapture();
+      _stopPoll();
+      _stopPing();
+    };
     ws.onerror   = () => {
       setError('Não foi possível conectar. Verifique se o server Jarvis está rodando em :8899.');
       setStatus('disconnected');
       _stopPoll();
+      _stopPing();
     };
     ws.onmessage = handleMessage;
-  }, [addEntry, handleMessage, stopCapture, _startPoll, _stopPoll]);
+  }, [addEntry, handleMessage, stopCapture, _startPoll, _stopPoll, _startPing, _stopPing]);
 
   const disconnect = useCallback(() => {
     _stopPoll();
+    _stopPing();
     stopCapture();
     wsRef.current?.close();
     wsRef.current = null;
-  }, [stopCapture, _stopPoll]);
+  }, [stopCapture, _stopPoll, _stopPing]);
 
   const startListening = useCallback(async () => {
     if (isCapturingRef.current) return;
 
-    // Ensure connected
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       await connect();
       await new Promise<void>(resolve => {
@@ -262,7 +306,6 @@ export function useVoice() {
     setError(null);
 
     try {
-      // Unlock playback AudioContext on user gesture
       await ensurePlayback();
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -276,7 +319,6 @@ export function useVoice() {
       const src = captureCtx.createMediaStreamSource(stream);
       sourceRef.current = src;
 
-      // ScriptProcessorNode is deprecated but universally supported
       const processor = captureCtx.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
 
@@ -335,6 +377,7 @@ export function useVoice() {
     queueData,
     skills,
     historyItems,
+    metrics,
     connect,
     disconnect,
     startListening,

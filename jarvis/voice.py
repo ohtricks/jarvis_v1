@@ -286,6 +286,8 @@ async def _run_session(
                         ctrl = json.loads(msg["text"])
                         if ctrl.get("type") == "end_of_speech":
                             pass  # Gemini VAD detecta silêncio automaticamente
+                        elif ctrl.get("type") == "ping":
+                            await _send_json(websocket, {"type": "pong", "ts": ctrl.get("ts")})
                         elif ctrl.get("type") == "text_command":
                             text = str(ctrl.get("text", "")).strip()
                             if text:

@@ -2,7 +2,7 @@ import os
 import time
 
 from .skills.registry import build_skills
-from .memory import add_turn, set_state, set_session, get_session
+from .memory import add_turn, set_state, set_session, get_session, set_last_llm_ms
 from .commands import handle_builtin
 from .router import route_input, strip_forced_prefix
 from .planner import make_plan
@@ -176,4 +176,6 @@ class JarvisAgent:
             return remember(f"Erro: {e}")
 
         finally:
-            flush_debug_entry(_resp[0], int((time.time() - t0) * 1000))
+            elapsed_ms = int((time.time() - t0) * 1000)
+            flush_debug_entry(_resp[0], elapsed_ms)
+            set_last_llm_ms(elapsed_ms)

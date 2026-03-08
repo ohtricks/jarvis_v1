@@ -30,7 +30,10 @@ from pydantic import BaseModel
 
 from .agent import JarvisAgent
 from . import voice as _voice
+import psutil
+
 from .memory import (
+    get_last_llm_ms,
     get_pending_policy_proposal,
     get_pending_recovery,
     get_pending_shell_allow_proposal,
@@ -251,12 +254,15 @@ async def confirm(body: ConfirmRequest, _: None = Depends(_verify_token)):
 
 @app.get("/api/status")
 async def status(_: None = Depends(_verify_token)):
-    """Retorna mode atual, resumo da queue e info de bloqueio."""
+    """Retorna mode atual, resumo da queue, métricas de sistema e info de bloqueio."""
     session = get_session()
     blocked_info = _get_blocked_info()
     return {
-        "mode": session.get("mode", "dry"),
-        "queue": _queue_summary(),
+        "mode":        session.get("mode", "dry"),
+        "queue":       _queue_summary(),
+        "cpu":         psutil.cpu_percent(interval=None),
+        "ram":         psutil.virtual_memory().percent,
+        "last_llm_ms": get_last_llm_ms(),
         **blocked_info,
     }
 
