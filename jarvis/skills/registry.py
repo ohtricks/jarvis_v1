@@ -20,6 +20,18 @@ from .google.gmail.write.send_email import GoogleGmailSendEmailSkill
 from .google.gmail.write.reply import GoogleGmailReplySkill
 from .google.gmail.labels.mark_read import GoogleGmailMarkReadSkill
 from .google.gmail.labels.archive import GoogleGmailArchiveSkill
+from .microsoft.outlook.read.list_today import MicrosoftOutlookListTodaySkill
+from .microsoft.outlook.read.list_unread import MicrosoftOutlookListUnreadSkill
+from .microsoft.outlook.read.search import MicrosoftOutlookSearchSkill
+from .microsoft.outlook.read.get_message import MicrosoftOutlookGetMessageSkill
+from .microsoft.outlook.read.get_latest import MicrosoftOutlookGetLatestSkill
+from .microsoft.outlook.threads.summarize_today import MicrosoftOutlookSummarizeTodaySkill
+from .microsoft.outlook.threads.summarize_unread import MicrosoftOutlookSummarizeUnreadSkill
+from .microsoft.outlook.threads.summarize_thread import MicrosoftOutlookSummarizeThreadSkill
+from .microsoft.outlook.write.send_email import MicrosoftOutlookSendEmailSkill
+from .microsoft.outlook.write.reply import MicrosoftOutlookReplySkill
+from .microsoft.outlook.labels.mark_read import MicrosoftOutlookMarkReadSkill
+from .microsoft.outlook.labels.archive import MicrosoftOutlookArchiveSkill
 from .capabilities import Capability, format_capabilities_for_prompt
 
 
@@ -52,6 +64,22 @@ def build_skills(execute: bool = False):
         # Google Gmail — labels (risky)
         "google_gmail_mark_read":        GoogleGmailMarkReadSkill(execute=execute),
         "google_gmail_archive":          GoogleGmailArchiveSkill(execute=execute),
+        # Microsoft Outlook — read
+        "microsoft_outlook_list_today":       MicrosoftOutlookListTodaySkill(),
+        "microsoft_outlook_list_unread":      MicrosoftOutlookListUnreadSkill(),
+        "microsoft_outlook_search":           MicrosoftOutlookSearchSkill(),
+        "microsoft_outlook_get_message":      MicrosoftOutlookGetMessageSkill(),
+        "microsoft_outlook_get_latest":       MicrosoftOutlookGetLatestSkill(),
+        # Microsoft Outlook — threads/summarize
+        "microsoft_outlook_summarize_today":  MicrosoftOutlookSummarizeTodaySkill(),
+        "microsoft_outlook_summarize_unread": MicrosoftOutlookSummarizeUnreadSkill(),
+        "microsoft_outlook_summarize_thread": MicrosoftOutlookSummarizeThreadSkill(),
+        # Microsoft Outlook — write (risky)
+        "microsoft_outlook_send_email":       MicrosoftOutlookSendEmailSkill(execute=execute),
+        "microsoft_outlook_reply":            MicrosoftOutlookReplySkill(execute=execute),
+        # Microsoft Outlook — labels (risky)
+        "microsoft_outlook_mark_read":        MicrosoftOutlookMarkReadSkill(execute=execute),
+        "microsoft_outlook_archive":          MicrosoftOutlookArchiveSkill(execute=execute),
     }
 
 
@@ -280,6 +308,115 @@ _CATALOG: list[Capability] = [
         description="Remove o email da caixa de entrada (archiva). Requer confirmação (risky).",
         args_schema={"account": "string?", "message_id": "string"},
         examples=["arquive o email", "archive este email"],
+        risk="risky",
+    ),
+    # ── Microsoft Outlook ─────────────────────────────────────────────────────
+    Capability(
+        name="microsoft_outlook_list_today",
+        namespace="microsoft.outlook",
+        title="Listar emails de hoje do Outlook",
+        description="Lista emails recentes da caixa do Outlook (últimas 24h).",
+        args_schema={"account": "string?", "max": "integer?", "period": "string?"},
+        examples=["emails de hoje do outlook", "meus emails outlook de hoje", "outlook hoje"],
+        risk="safe",
+    ),
+    Capability(
+        name="microsoft_outlook_list_unread",
+        namespace="microsoft.outlook",
+        title="Listar emails não lidos do Outlook",
+        description="Lista emails não lidos da caixa do Outlook.",
+        args_schema={"account": "string?", "max": "integer?"},
+        examples=["emails não lidos do outlook", "não lidos outlook", "outlook não lidos"],
+        risk="safe",
+    ),
+    Capability(
+        name="microsoft_outlook_search",
+        namespace="microsoft.outlook",
+        title="Buscar emails no Outlook",
+        description="Busca emails no Outlook com texto livre (assunto, remetente, corpo).",
+        args_schema={"account": "string?", "query": "string", "max": "integer?"},
+        examples=["buscar email outlook sobre reunião", "pesquisar outlook fatura", "outlook busca"],
+        risk="safe",
+    ),
+    Capability(
+        name="microsoft_outlook_get_message",
+        namespace="microsoft.outlook",
+        title="Ler email do Outlook por ID",
+        description="Lê o conteúdo completo de um email do Outlook pelo ID.",
+        args_schema={"account": "string?", "message_id": "string"},
+        examples=["ler email outlook <id>", "ver conteúdo do email outlook"],
+        risk="safe",
+    ),
+    Capability(
+        name="microsoft_outlook_get_latest",
+        namespace="microsoft.outlook",
+        title="Último email do Outlook",
+        description="Lê o email mais recente da caixa do Outlook.",
+        args_schema={"account": "string?"},
+        examples=["último email outlook", "email mais recente outlook", "outlook último email"],
+        risk="safe",
+    ),
+    Capability(
+        name="microsoft_outlook_summarize_today",
+        namespace="microsoft.outlook",
+        title="Resumir emails de hoje do Outlook",
+        description="Gera um resumo dos emails de hoje do Outlook usando IA.",
+        args_schema={"account": "string?", "max": "integer?"},
+        examples=["resuma emails do outlook de hoje", "resumo outlook hoje"],
+        risk="safe",
+    ),
+    Capability(
+        name="microsoft_outlook_summarize_unread",
+        namespace="microsoft.outlook",
+        title="Resumir emails não lidos do Outlook",
+        description="Gera um resumo dos emails não lidos do Outlook usando IA.",
+        args_schema={"account": "string?", "max": "integer?"},
+        examples=["resuma não lidos do outlook", "resumo outlook não lidos"],
+        risk="safe",
+    ),
+    Capability(
+        name="microsoft_outlook_summarize_thread",
+        namespace="microsoft.outlook",
+        title="Resumir conversa do Outlook",
+        description="Gera um resumo de uma conversa (thread) do Outlook.",
+        args_schema={"account": "string?", "conversation_id": "string"},
+        examples=["resuma essa conversa outlook", "resumo thread outlook"],
+        risk="safe",
+    ),
+    Capability(
+        name="microsoft_outlook_send_email",
+        namespace="microsoft.outlook",
+        title="Enviar email pelo Outlook",
+        description="Envia um email via Outlook. Requer confirmação (risky).",
+        args_schema={"account": "string?", "to": "string", "subject": "string?", "body": "string", "cc": "string?", "bcc": "string?"},
+        examples=["envie email pelo outlook para X", "mande email outlook para fulano@empresa.com"],
+        risk="risky",
+    ),
+    Capability(
+        name="microsoft_outlook_reply",
+        namespace="microsoft.outlook",
+        title="Responder email do Outlook",
+        description="Responde a um email do Outlook pelo ID. Requer confirmação (risky).",
+        args_schema={"account": "string?", "message_id": "string", "body": "string", "reply_all": "boolean?"},
+        examples=["responda o email outlook <id>", "reply outlook"],
+        risk="risky",
+    ),
+    Capability(
+        name="microsoft_outlook_mark_read",
+        namespace="microsoft.outlook",
+        title="Marcar como lido no Outlook",
+        description="Marca um email do Outlook como lido. Requer confirmação (risky).",
+        args_schema={"account": "string?", "message_id": "string"},
+        examples=["marque como lido outlook", "mark as read outlook"],
+        risk="risky",
+    ),
+    Capability(
+        name="microsoft_outlook_archive",
+        namespace="microsoft.outlook",
+        title="Arquivar email do Outlook",
+        description="Move o email do Outlook para a pasta Archive. Requer confirmação (risky).",
+        args_schema={"account": "string?", "message_id": "string"},
+        examples=["arquive o email outlook", "archive outlook"],
         risk="risky",
     ),
 ]

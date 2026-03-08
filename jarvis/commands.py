@@ -229,6 +229,40 @@ def handle_builtin(cmd: str, skills: dict, learn_state_fn) -> str | None:
             return "Nenhuma conta Gmail conectada. Use: auth gmail"
         return "Contas Gmail conectadas:\n" + "\n".join(f"  • {d}" for d in sorted(set(dirs)))
 
+    # ── Outlook: builtin explícito "auth outlook [alias]" ────────────────────
+    if c == "auth outlook" or c.startswith("auth outlook "):
+        alias = raw[len("auth outlook"):].strip() or "default"
+        from .wizards.outlook_oauth_wizard import run_outlook_oauth_wizard
+        _success, msg = run_outlook_oauth_wizard(initial_alias=alias if alias != "default" else None)
+        return msg
+
+    # ── Outlook: status de contas autenticadas ────────────────────────────────
+    if c == "outlook status" or c.startswith("outlook status "):
+        alias = raw[len("outlook status"):].strip() or None
+        from .integrations.microsoft import outlook_api as _oapi
+        if alias:
+            authed = _oapi.is_authed(alias)
+            return f"outlook '{alias}': {'✅ conectado' if authed else '❌ não conectado'}"
+        from pathlib import Path
+        base = _oapi.CREDS_DIR
+        dirs = []
+        if base.exists():
+            dirs = [d.name for d in base.iterdir() if d.is_dir() and (d / "token_cache.bin").exists()]
+        if not dirs:
+            return "Nenhuma conta Outlook conectada. Use: auth outlook"
+        return "Contas Outlook conectadas:\n" + "\n".join(f"  • {d}" for d in sorted(dirs))
+
+    if c == "outlook accounts":
+        from .integrations.microsoft import outlook_api as _oapi
+        from pathlib import Path
+        base = _oapi.CREDS_DIR
+        dirs = []
+        if base.exists():
+            dirs = [d.name for d in base.iterdir() if d.is_dir() and (d / "token_cache.bin").exists()]
+        if not dirs:
+            return "Nenhuma conta Outlook conectada. Use: auth outlook"
+        return "Contas Outlook conectadas:\n" + "\n".join(f"  • {d}" for d in sorted(dirs))
+
     # ── Gmail: auto-wizard quando não autenticado ─────────────────────────────
     words = set(c.split())
     if _detect_gmail_read(words):

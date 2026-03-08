@@ -40,6 +40,20 @@ def classify_action_risk(action: str, args: dict) -> Tuple[str, str, str]:
         "google_gmail_reply":      ("risky", "Vai responder um email.",          "fixed"),
         "google_gmail_mark_read":  ("risky", "Vai marcar email como lido.",      "fixed"),
         "google_gmail_archive":    ("risky", "Vai arquivar email da caixa.",     "fixed"),
+        # Microsoft Outlook — read/summarize (safe)
+        "microsoft_outlook_list_today":        ("safe", "", "fixed"),
+        "microsoft_outlook_list_unread":       ("safe", "", "fixed"),
+        "microsoft_outlook_search":            ("safe", "", "fixed"),
+        "microsoft_outlook_get_message":       ("safe", "", "fixed"),
+        "microsoft_outlook_get_latest":        ("safe", "", "fixed"),
+        "microsoft_outlook_summarize_today":   ("safe", "", "fixed"),
+        "microsoft_outlook_summarize_unread":  ("safe", "", "fixed"),
+        "microsoft_outlook_summarize_thread":  ("safe", "", "fixed"),
+        # Microsoft Outlook — write/labels (risky)
+        "microsoft_outlook_send_email": ("risky", "Vai enviar um email pelo Outlook.",             "fixed"),
+        "microsoft_outlook_reply":      ("risky", "Vai responder um email pelo Outlook.",          "fixed"),
+        "microsoft_outlook_mark_read":  ("risky", "Vai marcar email como lido no Outlook.",        "fixed"),
+        "microsoft_outlook_archive":    ("risky", "Vai arquivar email no Outlook.",                "fixed"),
     }
     if action in _FIXED_SKILL_RISK:
         return _FIXED_SKILL_RISK[action]

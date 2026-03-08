@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useVoice, VoiceStatus } from './hooks/useVoice';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CenterStage } from './components/CenterStage';
 import { RightLog } from './components/RightLog';
 import { GitDiffReviewModal } from './components/modal/GitDiffReviewModal';
+import { SettingsModal } from './components/modal/SettingsModal';
 
 const STATUS_COLOR: Record<VoiceStatus, string> = {
   disconnected: 'var(--t3)',
@@ -24,6 +25,8 @@ const STATUS_LABEL: Record<VoiceStatus, string> = {
 };
 
 export default function App() {
+  const [showSettings, setShowSettings] = useState(false);
+
   const {
     status,
     agentState,
@@ -77,6 +80,14 @@ export default function App() {
             <span className="hdr-status-dot" />
             {STATUS_LABEL[status]}
           </div>
+          <button
+            className="hdr-settings-btn"
+            onClick={() => setShowSettings(true)}
+            title="Configurações"
+            aria-label="Configurações"
+          >
+            ⚙
+          </button>
         </div>
       </header>
 
@@ -87,6 +98,9 @@ export default function App() {
           <button className="error-close" onClick={clearError} aria-label="fechar">×</button>
         </div>
       )}
+
+      {/* ── Settings Modal ── */}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
       {/* ── Git Diff Review Modal ── */}
       {modalPayload?.modal_type === 'git_diff_review' && (
