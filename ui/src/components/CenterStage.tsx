@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { VoiceStatus, BlockedInfo } from '../hooks/useVoice';
+import { VoiceStatus, BlockedInfo, SkillEvent } from '../hooks/useVoice';
+import { useSkillBubbles, MOCK_SKILLS } from '../hooks/useSkillBubbles';
 import { VoiceOrb } from './VoiceOrb';
 import { ControlBar } from './ControlBar';
+import { SkillBubbleLayer } from './orb/SkillBubbleLayer';
 
 function btnClass(s: string): string {
   const l = s.toLowerCase();
@@ -20,6 +22,7 @@ const DEBUG_LABELS: Record<string, string> = {
 interface Props {
   status: VoiceStatus;
   blocked: BlockedInfo | null;
+  lastSkillEvent: SkillEvent | null;
   onStart: () => void;
   onStop: () => void;
   onSendText: (text: string) => void;
@@ -30,6 +33,7 @@ interface Props {
 export function CenterStage({
   status,
   blocked,
+  lastSkillEvent,
   onStart,
   onStop,
   onSendText,
@@ -40,8 +44,14 @@ export function CenterStage({
   const [debugState, setDebugState] = useState<VoiceStatus | null>(null);
   const effectiveStatus = debugState ?? status;
 
+  const { bubbles, removeBubble, spawnBubble } = useSkillBubbles(lastSkillEvent);
+
   return (
     <main className="stage">
+
+      {/* Skill execution bubbles — float up from orb area */}
+      <SkillBubbleLayer bubbles={bubbles} onRemove={removeBubble} />
+
       <div className="stage-inner">
 
         {/* Orb */}
@@ -83,7 +93,7 @@ export function CenterStage({
           </div>
         )}
 
-        {/* Dev: state switcher */}
+        {/* Dev: state switcher + skill bubble mock */}
         {import.meta.env.DEV && (
           <div className="orb-debug-bar">
             <button
@@ -101,6 +111,16 @@ export function CenterStage({
                 {DEBUG_LABELS[s]}
               </button>
             ))}
+            <span className="orb-debug-sep" />
+            <button className="orb-debug-btn" onClick={() => spawnBubble()}>
+              +bubble
+            </button>
+            <button
+              className="orb-debug-btn"
+              onClick={() => MOCK_SKILLS.forEach((s, i) => setTimeout(() => spawnBubble(s), i * 350))}
+            >
+              burst
+            </button>
           </div>
         )}
 

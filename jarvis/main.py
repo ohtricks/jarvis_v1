@@ -1,6 +1,7 @@
 # jarvis/main.py
 import sys
 from .agent import JarvisAgent
+from .modal_payload import extract_modal
 
 
 def main():
@@ -27,7 +28,15 @@ def main():
     agent = JarvisAgent(execute=execute)
     response = agent.run(user_input)
 
-    print(f"\nJarvis: {response}\n")
+    clean, modal = extract_modal(response)
+    print(f"\nJarvis: {clean}\n")
+    if modal:
+        meta = modal.get("payload", {}).get("meta", {})
+        print(
+            f"[Modal {modal.get('modal_type', 'modal')}: "
+            f"{modal.get('payload', {}).get('summary', '')} | "
+            f"risco: {meta.get('risk_level', '?')}]\n"
+        )
 
 
 if __name__ == "__main__":

@@ -20,6 +20,9 @@ def classify_action_risk(action: str, args: dict) -> Tuple[str, str, str]:
     _FIXED_SKILL_RISK = {
         # Git
         "git_status":       ("safe",   "",                                                "fixed"),
+        "git_diff_review":    ("safe",   "",                                                "fixed"),
+        "git_diff_validate":  ("safe",   "",                                                "fixed"),
+        "git_generate_patch": ("safe",   "",                                                "fixed"),
         "git_add_all":      ("risky",  "Vai adicionar todos os arquivos ao stage.",       "fixed"),
         "git_commit":       ("risky",  "Vai criar um commit no repositório.",             "fixed"),
         "git_push":         ("risky",  "Vai enviar commits para o repositório remoto.",   "fixed"),

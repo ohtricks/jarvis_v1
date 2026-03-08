@@ -3,6 +3,7 @@ import { useVoice, VoiceStatus } from './hooks/useVoice';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CenterStage } from './components/CenterStage';
 import { RightLog } from './components/RightLog';
+import { GitDiffReviewModal } from './components/modal/GitDiffReviewModal';
 
 const STATUS_COLOR: Record<VoiceStatus, string> = {
   disconnected: 'var(--t3)',
@@ -27,6 +28,8 @@ export default function App() {
     status,
     transcript,
     blocked,
+    modalPayload,
+    lastSkillEvent,
     mode,
     error,
     queueData,
@@ -40,6 +43,7 @@ export default function App() {
     sendConfirmation,
     refreshHistory,
     clearError,
+    clearModal,
   } = useVoice();
 
   // Auto-connect WebSocket on mount (sem mic — exige gesto do usuário)
@@ -82,6 +86,15 @@ export default function App() {
         </div>
       )}
 
+      {/* ── Git Diff Review Modal ── */}
+      {modalPayload?.modal_type === 'git_diff_review' && (
+        <GitDiffReviewModal
+          payload={modalPayload}
+          onClose={clearModal}
+          onAction={sendConfirmation}
+        />
+      )}
+
       {/* ── 3-Column Body ── */}
       <div className="app-body">
         <LeftSidebar status={status} mode={mode} queueData={queueData} skills={skills} metrics={metrics} />
@@ -89,6 +102,7 @@ export default function App() {
         <CenterStage
           status={status}
           blocked={blocked}
+          lastSkillEvent={lastSkillEvent}
           onStart={startListening}
           onStop={stopListening}
           onSendText={sendConfirmation}

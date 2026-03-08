@@ -5,6 +5,9 @@ from .git.git_status import GitStatusSkill
 from .git.git_add_all import GitAddAllSkill
 from .git.git_commit import GitCommitSkill
 from .git.git_push import GitPushSkill
+from .git.git_diff_review import GitDiffReviewSkill
+from .git.git_diff_validate import GitDiffValidateSkill
+from .git.git_generate_patch import GitGeneratePatchSkill
 from .google.gmail.read.list_today import GoogleGmailListTodaySkill
 from .google.gmail.read.list_unread import GoogleGmailListUnreadSkill
 from .google.gmail.read.search import GoogleGmailSearchSkill
@@ -26,7 +29,10 @@ def build_skills(execute: bool = False):
         "open_app":   OpenAppSkill(execute=execute),
         "open_url":   OpenUrlSkill(execute=execute),
         "run_shell":  RunShellSkill(execute=execute),
-        "git_status":       GitStatusSkill(),
+        "git_status":           GitStatusSkill(),
+        "git_diff_review":      GitDiffReviewSkill(),
+        "git_diff_validate":    GitDiffValidateSkill(),
+        "git_generate_patch":   GitGeneratePatchSkill(execute=execute),
         "git_add_all":      GitAddAllSkill(execute=execute),
         "git_commit":       GitCommitSkill(execute=execute),
         "git_push":         GitPushSkill(execute=execute),
@@ -97,6 +103,47 @@ _CATALOG: list[Capability] = [
         description="Mostra o status do repositório git no diretório atual.",
         args_schema={"cwd": "string?"},
         examples=["ver status do git", "git status", "o que mudou?"],
+        risk="safe",
+    ),
+    Capability(
+        name="git_diff_review",
+        namespace="git",
+        title="Revisar Git Diff",
+        description="Analisa o diff atual do repositório: arquivos alterados, resumo de adições/remoções, insights de risco e ações sugeridas. Retorna payload estruturado para modal de revisão na UI.",
+        args_schema={"cwd": "string?"},
+        examples=[
+            "mostre o git diff do projeto",
+            "analise o diff atual",
+            "revise as alterações",
+            "o que mudou no código?",
+        ],
+        risk="safe",
+    ),
+    Capability(
+        name="git_diff_validate",
+        namespace="git",
+        title="Validar Git Diff (LLM)",
+        description="Envia o diff atual para análise com IA: detecta bugs, problemas de segurança, código morto e sugere melhorias. Ideal após git_diff_review para aprofundar a análise.",
+        args_schema={"cwd": "string?"},
+        examples=[
+            "valide o diff atual",
+            "analise o diff com IA",
+            "tem algum bug no diff?",
+            "revisar com LLM",
+        ],
+        risk="safe",
+    ),
+    Capability(
+        name="git_generate_patch",
+        namespace="git",
+        title="Gerar Patch do Diff",
+        description="Exporta o diff atual como arquivo .patch em ~/.jarvis/patch_<timestamp>.patch.",
+        args_schema={"cwd": "string?"},
+        examples=[
+            "gerar patch do diff",
+            "exportar diff como patch",
+            "salvar alterações como patch",
+        ],
         risk="safe",
     ),
     Capability(

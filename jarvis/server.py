@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from .agent import JarvisAgent
 from . import voice as _voice
+from .modal_payload import extract_modal
 import psutil
 
 from .memory import (
@@ -191,6 +192,9 @@ class RunResponse(BaseModel):
     blocked_step: str | None = None
     blocked_note: str | None = None
     suggestions: list[str] = []
+    # Payload estruturado para a UI renderizar modais (git_diff_review, etc.)
+    # Presente apenas quando a skill retorna embed_modal().
+    modal_payload: dict | None = None
 
 
 class ConfirmRequest(BaseModel):
@@ -216,10 +220,12 @@ async def run(body: RunRequest, _: None = Depends(_verify_token)):
     finally:
         _lock.release()
 
+    response_text, modal = extract_modal(response)
     blocked_info = _get_blocked_info()
     return RunResponse(
-        response=response,
+        response=response_text,
         request_id=uuid.uuid4().hex[:8],
+        modal_payload=modal,
         **blocked_info,
     )
 
@@ -244,10 +250,12 @@ async def confirm(body: ConfirmRequest, _: None = Depends(_verify_token)):
     finally:
         _lock.release()
 
+    response_text, modal = extract_modal(response)
     blocked_info = _get_blocked_info()
     return RunResponse(
-        response=response,
+        response=response_text,
         request_id=uuid.uuid4().hex[:8],
+        modal_payload=modal,
         **blocked_info,
     )
 

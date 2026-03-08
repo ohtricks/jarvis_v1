@@ -38,6 +38,7 @@ from google import genai
 from google.genai import types
 
 from .voice_tools import build_voice_tools
+from .modal_payload import extract_modal
 
 logger = logging.getLogger(__name__)
 
@@ -403,15 +404,24 @@ async def _execute_ask_jarvis(
         result = f"Erro ao executar: {e}"
 
     # Notifica browser do resultado (para UI)
+    clean_result, modal = extract_modal(result)
     await _send_json(websocket, {
         "type": "tool_result",
         "action": "ask_jarvis",
         "command": command,
-        "result": result,
+        "result": clean_result,
+        **({"modal_payload": modal} if modal else {}),
     })
 
+    # Se há modal, envia mensagem dedicada para a UI abrir o modal
+    if modal:
+        await _send_json(websocket, {
+            "type": "modal",
+            "modal_payload": modal,
+        })
+
     # Verifica se é uma ação bloqueada e notifica browser
-    blocked = _detect_blocked(result)
+    blocked = _detect_blocked(clean_result)
     if blocked:
         await _send_json(websocket, blocked)
 
@@ -422,7 +432,7 @@ async def _execute_ask_jarvis(
                 types.FunctionResponse(
                     id=call_id,
                     name="ask_jarvis",
-                    response={"result": result},
+                    response={"result": clean_result},
                 )
             ]
         )

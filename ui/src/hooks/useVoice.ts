@@ -22,6 +22,66 @@ export interface BlockedInfo {
   suggestions: string[];
 }
 
+export interface SkillEvent {
+  action: string;
+  ts: number;
+}
+
+// ── Modal payload types ───────────────────────────────────────────────────────
+
+export interface DiffFileEntry {
+  file: string;
+  additions: number;
+  deletions: number;
+  status: 'added' | 'modified' | 'deleted';
+}
+
+export interface DiffSection {
+  file: string;
+  content: string;
+  truncated: boolean;
+}
+
+export interface DiffInsight {
+  level: 'ok' | 'info' | 'warning' | 'error';
+  message: string;
+}
+
+export interface DiffAction {
+  id: string;
+  label: string;
+  description: string;
+  command: string;
+  enabled: boolean;
+  risk?: string;
+}
+
+export interface GitDiffPayload {
+  title: string;
+  summary: string;
+  meta: {
+    files_changed: number;
+    additions: number;
+    deletions: number;
+    risk_level: 'low' | 'medium' | 'high';
+    truncated: boolean;
+    total_files: number;
+    shown_files: number;
+  };
+  sections: {
+    files: DiffFileEntry[];
+    diff: DiffSection[];
+    insights: DiffInsight[];
+  };
+  actions: DiffAction[];
+}
+
+export interface ModalPayload {
+  ui_hint: 'modal';
+  modal_type: 'git_diff_review';
+  payload: GitDiffPayload;
+}
+
 export interface QueueData {
   total: number;
   pending: number;
@@ -53,10 +113,12 @@ const SKILLS_URL  = 'http://127.0.0.1:8899/api/skills';
 const HISTORY_URL = 'http://127.0.0.1:8899/api/history';
 
 export function useVoice() {
-  const [status,       setStatus]       = useState<VoiceStatus>('disconnected');
-  const [transcript,   setTranscript]   = useState<TranscriptEntry[]>([]);
-  const [blocked,      setBlocked]      = useState<BlockedInfo | null>(null);
-  const [mode,         setMode]         = useState<'dry' | 'execute'>('dry');
+  const [status,        setStatus]        = useState<VoiceStatus>('disconnected');
+  const [transcript,    setTranscript]    = useState<TranscriptEntry[]>([]);
+  const [blocked,       setBlocked]       = useState<BlockedInfo | null>(null);
+  const [modalPayload,  setModalPayload]  = useState<ModalPayload | null>(null);
+  const [lastSkillEvent, setLastSkillEvent] = useState<SkillEvent | null>(null);
+  const [mode,          setMode]          = useState<'dry' | 'execute'>('dry');
   const [error,        setError]        = useState<string | null>(null);
   const [queueData,    setQueueData]    = useState<QueueData | null>(null);
   const [skills,       setSkills]       = useState<string[]>([]);
@@ -195,6 +257,7 @@ export function useVoice() {
           break;
         case 'tool_result':
           if (msg.result) addEntry('system', `[${msg.action ?? 'jarvis'}] ${msg.result}`);
+          if (msg.action) setLastSkillEvent({ action: msg.action as string, ts: Date.now() });
           break;
         case 'blocked':
           setBlocked({
@@ -203,6 +266,9 @@ export function useVoice() {
             blocked_note: msg.blocked_note ?? null,
             suggestions:  msg.suggestions  ?? [],
           });
+          break;
+        case 'modal':
+          if (msg.modal_payload) setModalPayload(msg.modal_payload as ModalPayload);
           break;
         case 'pong':
           if (typeof msg.ts === 'number') {
@@ -372,6 +438,8 @@ export function useVoice() {
     status,
     transcript,
     blocked,
+    modalPayload,
+    lastSkillEvent,
     mode,
     error,
     queueData,
@@ -384,6 +452,7 @@ export function useVoice() {
     stopListening,
     sendConfirmation,
     refreshHistory,
-    clearError: () => setError(null),
+    clearError:  () => setError(null),
+    clearModal:  () => setModalPayload(null),
   };
 }
