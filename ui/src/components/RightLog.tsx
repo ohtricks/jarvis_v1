@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { TranscriptEntry, HistoryItem } from '../hooks/useVoice';
+import { TranscriptEntry, HistoryItem, ActivityEvent, ActivityEventType } from '../hooks/useVoice';
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -30,6 +30,49 @@ function MessageEntry({ entry }: { entry: TranscriptEntry }) {
         <span className="msg-time">{fmtTime(entry.ts)}</span>
       </div>
       <div className="msg-body">{entry.text}</div>
+    </div>
+  );
+}
+
+// ── Activity Feed ─────────────────────────────────────────────────────────────
+
+const ACTIVITY_ICON: Partial<Record<ActivityEventType, string>> = {
+  thinking:   '◌',
+  planning:   '◈',
+  compiling:  '◎',
+  executing:  '▷',
+  skill_start:'◉',
+  skill_done: '◉',
+  skill_fail: '◉',
+  blocked:    '◈',
+  responding: '◌',
+  user:       '▸',
+  assistant:  '▹',
+};
+
+const ACTIVITY_COLOR: Partial<Record<ActivityEventType, string>> = {
+  thinking:   'var(--amber)',
+  planning:   'var(--amber)',
+  compiling:  'var(--amber)',
+  executing:  'var(--cyan)',
+  skill_start:'var(--cyan)',
+  skill_done: 'var(--mint)',
+  skill_fail: 'var(--rose)',
+  blocked:    'var(--rose)',
+  responding: 'var(--violet)',
+  user:       'var(--t2)',
+  assistant:  'var(--violet)',
+};
+
+function ActivityEntry({ event }: { event: ActivityEvent }) {
+  const icon  = ACTIVITY_ICON[event.type]  ?? '·';
+  const color = ACTIVITY_COLOR[event.type] ?? 'var(--t3)';
+
+  return (
+    <div className={`activity-entry activity-${event.type}`}>
+      <span className="activity-icon" style={{ color }}>{icon}</span>
+      <span className="activity-label">{event.label}</span>
+      <span className="activity-time">{fmtTime(event.ts)}</span>
     </div>
   );
 }
@@ -87,6 +130,15 @@ function IconChat() {
   );
 }
 
+function IconActivity() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  );
+}
+
 function IconHistory() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
@@ -100,38 +152,67 @@ function IconHistory() {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-type Tab = 'session' | 'history';
+type Tab = 'session' | 'activity' | 'history';
 
 interface Props {
   entries: TranscriptEntry[];
+  activityFeed: ActivityEvent[];
   historyItems: HistoryItem[];
   onRefreshHistory: () => void;
 }
 
-export function RightLog({ entries, historyItems, onRefreshHistory }: Props) {
-  const [tab, setTab] = useState<Tab>('session');
-  const bottomRef = useRef<HTMLDivElement>(null);
+export function RightLog({ entries, activityFeed, historyItems, onRefreshHistory }: Props) {
+  const [tab, setTab] = useState<Tab>('activity');
+  const bottomRef      = useRef<HTMLDivElement>(null);
+  const activityRef    = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll quando novas mensagens chegam na aba sessão
+  // Auto-scroll session
   useEffect(() => {
     if (tab === 'session') {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [entries, tab]);
 
+  // Auto-scroll activity feed para o fim quando chega novos eventos
+  useEffect(() => {
+    if (tab === 'activity' && activityRef.current) {
+      activityRef.current.scrollTop = activityRef.current.scrollHeight;
+    }
+  }, [activityFeed, tab]);
+
+  // Quando chega evento novo, muda tab automaticamente para activity (se estiver em session)
+  const prevActivityLen = useRef(activityFeed.length);
+  useEffect(() => {
+    if (activityFeed.length > prevActivityLen.current && tab === 'session') {
+      // não faz switch automático — usuário pode estar lendo a sessão
+    }
+    prevActivityLen.current = activityFeed.length;
+  }, [activityFeed.length, tab]);
+
   const handleTabChange = (t: Tab) => {
     setTab(t);
     if (t === 'history') onRefreshHistory();
   };
 
-  const count = tab === 'session'
-    ? (entries.length > 0 ? `${entries.length} msg` : '—')
-    : (historyItems.length > 0 ? `${historyItems.length}` : '—');
+  const activityCount = activityFeed.length > 0 ? `${activityFeed.length}` : '—';
+  const sessionCount  = entries.length      > 0 ? `${entries.length} msg` : '—';
+
+  // Badge de "ao vivo" na aba execução quando há eventos recentes (últimos 3s)
+  const lastActivity = activityFeed[activityFeed.length - 1];
+  const isLive = lastActivity && (Date.now() - lastActivity.ts.getTime()) < 3500;
 
   return (
     <aside className="log-panel">
       {/* Tabs */}
       <div className="log-tabs">
+        <button
+          className={`log-tab ${tab === 'activity' ? 'active' : ''}`}
+          onClick={() => handleTabChange('activity')}
+        >
+          <IconActivity />
+          execução
+          {isLive && <span className="log-tab-live" />}
+        </button>
         <button
           className={`log-tab ${tab === 'session' ? 'active' : ''}`}
           onClick={() => handleTabChange('session')}
@@ -146,12 +227,21 @@ export function RightLog({ entries, historyItems, onRefreshHistory }: Props) {
           <IconHistory />
           histórico
         </button>
-        <span className="log-tab-count">{count}</span>
+        <span className="log-tab-count">
+          {tab === 'activity' ? activityCount : tab === 'session' ? sessionCount : (historyItems.length > 0 ? `${historyItems.length}` : '—')}
+        </span>
       </div>
 
       {/* Content */}
-      <div className="log-scroll">
-        {tab === 'session' ? (
+      <div
+        className="log-scroll"
+        ref={tab === 'activity' ? activityRef : undefined}
+      >
+        {tab === 'activity' ? (
+          activityFeed.length === 0
+            ? <EmptyState text="aguardando execução" />
+            : activityFeed.map(e => <ActivityEntry key={e.id} event={e} />)
+        ) : tab === 'session' ? (
           entries.length === 0
             ? <EmptyState />
             : entries.map(e => <MessageEntry key={e.id} entry={e} />)

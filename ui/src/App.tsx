@@ -26,10 +26,12 @@ const STATUS_LABEL: Record<VoiceStatus, string> = {
 export default function App() {
   const {
     status,
+    agentState,
     transcript,
     blocked,
     modalPayload,
     lastSkillEvent,
+    activityFeed,
     mode,
     error,
     queueData,
@@ -101,6 +103,7 @@ export default function App() {
 
         <CenterStage
           status={status}
+          agentState={agentState}
           blocked={blocked}
           lastSkillEvent={lastSkillEvent}
           onStart={startListening}
@@ -110,7 +113,12 @@ export default function App() {
           onDisconnect={disconnect}
         />
 
-        <RightLog entries={transcript} historyItems={historyItems} onRefreshHistory={refreshHistory} />
+        <RightLog
+          entries={transcript}
+          activityFeed={activityFeed}
+          historyItems={historyItems}
+          onRefreshHistory={refreshHistory}
+        />
       </div>
 
     </div>

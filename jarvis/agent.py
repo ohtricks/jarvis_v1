@@ -12,6 +12,7 @@ from .queue import enqueue_plan, clear_queue, has_active_queue
 from .executor import execute_until_blocked, execute_until_blocked_or_recovery
 from .telemetry import start_debug_entry, debug_set, flush_debug_entry
 from .ux import ux_stage, ux_format_response
+from .events import emit
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
 
@@ -74,6 +75,7 @@ class JarvisAgent:
             update_context_state()
 
             stages.append(ux_stage("analisando"))
+            emit("agent:thinking")
 
             # built-ins first (NO LLM)
             out = handle_builtin(user_input, self.SKILLS, self._learn_state_from_action)
@@ -94,12 +96,14 @@ class JarvisAgent:
                 r = route_input(text)
 
             if r["route"] == "fast_reply":
+                emit("agent:responding")
                 return remember(r.get("response") or text)
 
             # planner route => create queue + execute until blocked/end (V3)
             if r["route"] == "planner":
                 stages.append(ux_stage("roteando", "planner"))
                 stages.append(ux_stage("planejando", "reasoning"))
+                emit("agent:planning")
 
                 plan_data = make_plan(text)
                 goal = plan_data["goal"]
@@ -110,6 +114,7 @@ class JarvisAgent:
 
                 stages.append(ux_stage("enfileirando"))
                 stages.append(ux_stage("executando"))
+                emit("agent:executing")
 
                 res = execute_until_blocked_or_recovery(self.SKILLS, self._learn_state_from_action, goal=goal)
                 run_out = res["message"]
@@ -118,6 +123,7 @@ class JarvisAgent:
                     stages.append(ux_stage("recuperação", "aguardando aprovação"))
                     if DEBUG:
                         debug_set("ux_stages", stages)
+                    emit("agent:responding")
                     return remember(ux_format_response(stages, run_out, False))
 
                 blocked = has_active_queue()
@@ -128,6 +134,7 @@ class JarvisAgent:
 
                 if DEBUG:
                     debug_set("ux_stages", stages)
+                emit("agent:responding")
                 return remember(ux_format_response(stages, run_out, blocked))
 
             # executor route => fast/brain compila 1-3 ações diretas (sem reasoning)
@@ -135,11 +142,13 @@ class JarvisAgent:
                 exec_model = r.get("executor_model", "fast")
                 stages.append(ux_stage("roteando", f"executor ({exec_model})"))
                 stages.append(ux_stage("compilando", exec_model))
+                emit("agent:compiling", model=exec_model)
 
                 result = make_actions(text, model=exec_model)
 
                 # chat: skill inexistente ou limitação — responde direto
                 if "chat" in result:
+                    emit("agent:responding")
                     return remember(result["chat"])
 
                 goal = result["goal"]
@@ -150,6 +159,7 @@ class JarvisAgent:
 
                 stages.append(ux_stage("enfileirando"))
                 stages.append(ux_stage("executando"))
+                emit("agent:executing")
 
                 res = execute_until_blocked_or_recovery(self.SKILLS, self._learn_state_from_action, goal=goal)
                 run_out = res["message"]
@@ -158,6 +168,7 @@ class JarvisAgent:
                     stages.append(ux_stage("recuperação", "aguardando aprovação"))
                     if DEBUG:
                         debug_set("ux_stages", stages)
+                    emit("agent:responding")
                     return remember(ux_format_response(stages, run_out, False))
 
                 blocked = has_active_queue()
@@ -168,6 +179,7 @@ class JarvisAgent:
 
                 if DEBUG:
                     debug_set("ux_stages", stages)
+                emit("agent:responding")
                 return remember(ux_format_response(stages, run_out, blocked))
 
             return remember("Não consegui processar seu pedido agora.")

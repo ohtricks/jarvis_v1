@@ -1686,3 +1686,230 @@ body::before {
   color: var(--amber);
 }
 .diff-action-btn.risky:hover { background: rgba(240,160,32,0.2); }
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Skill Bubbles — fases de ciclo de vida (running / completed / failed)
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Fase HOVER (running): pulsa suavemente no lugar sem subir */
+.skill-bubble.sb-phase-hover {
+  animation: sb-hover 1.6s ease-in-out infinite;
+}
+
+/* Fase EXIT completed: sobe e some com cor de sucesso */
+.skill-bubble.sb-phase-exit.sb-status-completed {
+  animation: sb-exit-ok var(--sb-duration, 1100ms) cubic-bezier(0.25, 0.80, 0.35, 1) forwards;
+  border-color: rgba(0, 229, 160, 0.40);
+  background: rgba(0, 229, 160, 0.08);
+}
+
+/* Fase EXIT failed: sobe e some com cor de erro */
+.skill-bubble.sb-phase-exit.sb-status-failed {
+  animation: sb-exit-fail var(--sb-duration, 1100ms) cubic-bezier(0.25, 0.80, 0.35, 1) forwards;
+  border-color: rgba(255, 95, 126, 0.40);
+  background: rgba(255, 95, 126, 0.08);
+}
+
+/* Ícone check (completed) */
+.skill-bubble-check {
+  font-size: 9px;
+  color: var(--mint);
+  line-height: 1;
+  margin-left: 2px;
+  opacity: 0.9;
+}
+
+/* Ícone fail */
+.skill-bubble-fail {
+  font-size: 9px;
+  color: var(--rose);
+  line-height: 1;
+  margin-left: 2px;
+  opacity: 0.9;
+}
+
+/* Dot: running = pulsa com cor cyan; completed = mint; failed = rose */
+.skill-bubble.sb-status-running .skill-bubble-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 6px var(--cyan), 0 0 14px rgba(0, 212, 255, 0.45);
+  animation: sb-dot-run 1.0s ease-in-out infinite;
+}
+.skill-bubble.sb-phase-exit.sb-status-completed .skill-bubble-dot {
+  background: var(--mint);
+  box-shadow: 0 0 6px var(--mint), 0 0 12px rgba(0, 229, 160, 0.40);
+  animation: none;
+}
+.skill-bubble.sb-phase-exit.sb-status-failed .skill-bubble-dot {
+  background: var(--rose);
+  box-shadow: 0 0 6px var(--rose), 0 0 12px rgba(255, 95, 126, 0.40);
+  animation: none;
+}
+
+/* Label: running = cyan; exit = herda da cor do status */
+.skill-bubble.sb-status-running .skill-bubble-label { color: var(--cyan-text); }
+.skill-bubble.sb-phase-exit.sb-status-completed .skill-bubble-label { color: rgba(0, 229, 160, 0.90); }
+.skill-bubble.sb-phase-exit.sb-status-failed .skill-bubble-label { color: rgba(255, 95, 126, 0.90); }
+
+/* ── Keyframes bubbles ─────────────────────────────────────────────────────── */
+
+/* Pulsação suave no lugar enquanto running */
+@keyframes sb-hover {
+  0%, 100% {
+    opacity: 0.80;
+    transform: translateX(-50%) translateY(0px) scale(1.00);
+    filter: blur(0px);
+  }
+  30% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px) scale(0.72);
+    filter: blur(3px);
+  }
+  40% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-2px) scale(1.04);
+    filter: blur(0px);
+  }
+  60% {
+    opacity: 0.95;
+    transform: translateX(-50%) translateY(-4px) scale(1.01);
+  }
+}
+
+/* Saída bem-sucedida: sobe suavemente */
+@keyframes sb-exit-ok {
+  0% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0px) scale(1.02);
+    filter: blur(0px);
+  }
+  60% {
+    opacity: 0.7;
+    transform: translateX(calc(-50% + var(--sb-drift, 0px))) translateY(-70px) scale(0.96);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(calc(-50% + calc(var(--sb-drift, 0px) * 0.6))) translateY(-120px) scale(0.80);
+    filter: blur(1.5px);
+  }
+}
+
+/* Saída com falha: sobe com tremor leve */
+@keyframes sb-exit-fail {
+  0% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0px) scale(1.02);
+    filter: blur(0px);
+  }
+  15% { transform: translateX(calc(-50% + 4px)) translateY(-8px); }
+  30% { transform: translateX(calc(-50% - 4px)) translateY(-18px); }
+  45% { transform: translateX(calc(-50% + 2px)) translateY(-30px); }
+  70% {
+    opacity: 0.6;
+    transform: translateX(calc(-50% + var(--sb-drift, 0px))) translateY(-65px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(calc(-50% + calc(var(--sb-drift, 0px) * 0.5))) translateY(-100px) scale(0.80);
+    filter: blur(1.5px);
+  }
+}
+
+/* Dot pulsante enquanto running */
+@keyframes sb-dot-run {
+  0%, 100% { transform: scale(1.0); opacity: 0.8; }
+  50% { transform: scale(1.4); opacity: 1; }
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Activity Feed — timeline de execução em tempo real
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.activity-entry {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 12px 5px 10px;
+  border-left: 1px solid transparent;
+  transition: background 0.15s;
+  animation: activity-in 0.22s ease-out both;
+}
+
+.activity-entry:hover {
+  background: var(--bg-hover);
+}
+
+/* Linha de entrada suave */
+@keyframes activity-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Categorias visuais */
+.activity-entry.activity-thinking   { border-left-color: rgba(240, 160, 32, 0.30); }
+.activity-entry.activity-planning   { border-left-color: rgba(240, 160, 32, 0.40); }
+.activity-entry.activity-compiling  { border-left-color: rgba(240, 160, 32, 0.35); }
+.activity-entry.activity-executing  { border-left-color: rgba(0, 212, 255, 0.30); }
+.activity-entry.activity-skill_start{ border-left-color: rgba(0, 212, 255, 0.45); }
+.activity-entry.activity-skill_done { border-left-color: rgba(0, 229, 160, 0.45); }
+.activity-entry.activity-skill_fail { border-left-color: rgba(255, 95, 126, 0.45); }
+.activity-entry.activity-blocked    { border-left-color: rgba(255, 95, 126, 0.35); }
+.activity-entry.activity-responding { border-left-color: rgba(149, 128, 255, 0.35); }
+.activity-entry.activity-user       { border-left-color: rgba(255,255,255,0.08); }
+.activity-entry.activity-assistant  { border-left-color: rgba(149, 128, 255, 0.20); }
+
+.activity-icon {
+  font-size: 10px;
+  line-height: 1.6;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.activity-label {
+  font-size: 11px;
+  color: var(--t2);
+  line-height: 1.5;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.activity-entry.activity-skill_start .activity-label,
+.activity-entry.activity-skill_done  .activity-label { color: var(--t1); }
+.activity-entry.activity-skill_fail  .activity-label { color: var(--rose); opacity: 0.85; }
+.activity-entry.activity-blocked     .activity-label { color: var(--rose); opacity: 0.80; }
+.activity-entry.activity-user        .activity-label { color: var(--t2); font-style: italic; }
+.activity-entry.activity-assistant   .activity-label { color: var(--violet); opacity: 0.80; }
+
+.activity-time {
+  font-size: 9px;
+  color: var(--t3);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Badge "ao vivo" na aba */
+.log-tab-live {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 5px var(--mint);
+  margin-left: 4px;
+  animation: live-pulse 1.2s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.7); }
+}

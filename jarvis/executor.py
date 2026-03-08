@@ -1,5 +1,6 @@
 import os
 import time
+import uuid
 from typing import Tuple
 
 from .queue import (
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 from .memory import get_session, build_context, set_pending_recovery, append_execution
 from .telemetry import debug_append
 from .observation import observe_step, should_propose_recovery
+from .events import emit
 from . import autonomy_safe
 
 DEBUG = os.getenv("JARVIS_DEBUG", "0") == "1"
@@ -36,6 +38,7 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
     action = it.get("action")
     args = it.get("args", {}) or {}
     step_label = it.get("step", action)
+    skill_id = str(uuid.uuid4())[:8]
 
     sess = get_session()
     mode = (sess.get("mode") or "dry").lower()
@@ -64,12 +67,14 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
         mark_blocked(idx, risk, note, confirm=confirm)
         _ts = datetime.now(timezone.utc).isoformat()
         append_execution({"ts": _ts, "action": action, "args": args, "status": "blocked", "output": note[:200]})
+        emit("task:blocked", skill_id=skill_id, action=action, kind=risk)
         if DEBUG:
             debug_append("execution", {"step": step_label, "action": action, "risk": risk, "status": "blocked", "output": note, "ms": int((time.time() - t0) * 1000)})
         return confirm_message(risk, note), "blocked"
 
     # Execução real (única fonte de execução)
     mark_running(idx)
+    emit("skill:started", skill_id=skill_id, action=action)
     try:
         skill = skills[action]
 
@@ -88,6 +93,7 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
         mark_done(idx, out)
         _ts = datetime.now(timezone.utc).isoformat()
         append_execution({"ts": _ts, "action": action, "args": args, "status": "done", "output": (out or "")[:200]})
+        emit("skill:completed", skill_id=skill_id, action=action, preview=(out or "")[:80])
         if DEBUG:
             debug_append("execution", {"step": step_label, "action": action, "risk": risk, "status": "done", "output": out, "ms": int((time.time() - t0) * 1000)})
         return out, "done"
@@ -96,6 +102,7 @@ def execute_one(skills: dict, learn_state_fn) -> Tuple[str, str]:
         mark_failed(idx, str(e))
         _ts = datetime.now(timezone.utc).isoformat()
         append_execution({"ts": _ts, "action": action, "args": args, "status": "failed", "output": str(e)[:200]})
+        emit("skill:failed", skill_id=skill_id, action=action, error=str(e)[:80])
         if DEBUG:
             debug_append("execution", {"step": step_label, "action": action, "risk": risk, "status": "failed", "output": str(e), "ms": int((time.time() - t0) * 1000)})
         return f"Erro ao executar ação: {e}", "failed"

@@ -8,6 +8,16 @@ export type VoiceStatus =
   | 'processing'
   | 'speaking';
 
+// Estado do agente — mais granular que VoiceStatus
+export type AgentState =
+  | 'idle'
+  | 'thinking'
+  | 'planning'
+  | 'compiling'
+  | 'executing'
+  | 'blocked'
+  | 'responding';
+
 export interface TranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -25,6 +35,42 @@ export interface BlockedInfo {
 export interface SkillEvent {
   action: string;
   ts: number;
+  skillId?: string;
+  phase?: 'started' | 'completed' | 'failed';
+}
+
+// ── Activity Feed ─────────────────────────────────────────────────────────────
+
+export type ActivityEventType =
+  | 'thinking'
+  | 'planning'
+  | 'compiling'
+  | 'executing'
+  | 'skill_start'
+  | 'skill_done'
+  | 'skill_fail'
+  | 'blocked'
+  | 'responding'
+  | 'user'
+  | 'assistant';
+
+export interface ActivityEvent {
+  id: string;
+  type: ActivityEventType;
+  label: string;
+  ts: Date;
+  skillId?: string;
+  action?: string;
+}
+
+// ── Active Skills ─────────────────────────────────────────────────────────────
+
+export interface ActiveSkill {
+  skillId: string;
+  action: string;
+  label: string;
+  startedAt: Date;
+  status: 'running' | 'completed' | 'failed';
 }
 
 // ── Modal payload types ───────────────────────────────────────────────────────
@@ -107,6 +153,28 @@ export interface SystemMetrics {
   llmMs: number | null;
 }
 
+// ── Utils ─────────────────────────────────────────────────────────────────────
+
+function formatSkillLabel(action: string): string {
+  return action
+    .replace(/^google_/, '')
+    .replace(/_/g, '.');
+}
+
+const ACTIVITY_LABEL: Record<ActivityEventType, string> = {
+  thinking:   'Analisando solicitação',
+  planning:   'Planejando estratégia',
+  compiling:  'Compilando ações',
+  executing:  'Executando plano',
+  skill_start:'',  // label built dynamically
+  skill_done: '',
+  skill_fail: '',
+  blocked:    'Aguardando confirmação',
+  responding: 'Gerando resposta',
+  user:       '',
+  assistant:  '',
+};
+
 const WS_URL      = 'ws://127.0.0.1:8899/api/voice';
 const STATUS_URL  = 'http://127.0.0.1:8899/api/status';
 const SKILLS_URL  = 'http://127.0.0.1:8899/api/skills';
@@ -114,10 +182,13 @@ const HISTORY_URL = 'http://127.0.0.1:8899/api/history';
 
 export function useVoice() {
   const [status,        setStatus]        = useState<VoiceStatus>('disconnected');
+  const [agentState,    setAgentState]    = useState<AgentState>('idle');
   const [transcript,    setTranscript]    = useState<TranscriptEntry[]>([]);
   const [blocked,       setBlocked]       = useState<BlockedInfo | null>(null);
   const [modalPayload,  setModalPayload]  = useState<ModalPayload | null>(null);
   const [lastSkillEvent, setLastSkillEvent] = useState<SkillEvent | null>(null);
+  const [activityFeed,  setActivityFeed]  = useState<ActivityEvent[]>([]);
+  const [activeSkills,  setActiveSkills]  = useState<ActiveSkill[]>([]);
   const [mode,          setMode]          = useState<'dry' | 'execute'>('dry');
   const [error,        setError]        = useState<string | null>(null);
   const [queueData,    setQueueData]    = useState<QueueData | null>(null);
@@ -145,6 +216,17 @@ export function useVoice() {
     setTranscript(prev => [
       ...prev,
       { id: crypto.randomUUID(), role, text: trimmed, ts: new Date() },
+    ]);
+  }, []);
+
+  const addActivity = useCallback((
+    type: ActivityEventType,
+    label: string,
+    extra?: { skillId?: string; action?: string },
+  ) => {
+    setActivityFeed(prev => [
+      ...prev.slice(-79), // manter últimos 80 eventos
+      { id: crypto.randomUUID(), type, label, ts: new Date(), ...extra },
     ]);
   }, []);
 
@@ -245,20 +327,103 @@ export function useVoice() {
     try {
       const msg = JSON.parse(event.data as string);
       switch (msg.type) {
+
+        // ── Voz / transcrição ─────────────────────────────────────────────
         case 'transcript':
           addEntry('user', msg.text ?? '');
+          addActivity('user', msg.text ?? '');
           setStatus('processing');
           break;
         case 'response_text':
           addEntry('assistant', msg.text ?? '');
+          addActivity('assistant', msg.text ?? '');
           break;
         case 'audio':
           if (msg.data) playAudioChunk(msg.data);
           break;
+
+        // ── Resultado final (legado — mantém compatibilidade) ─────────────
         case 'tool_result':
           if (msg.result) addEntry('system', `[${msg.action ?? 'jarvis'}] ${msg.result}`);
-          if (msg.action) setLastSkillEvent({ action: msg.action as string, ts: Date.now() });
+          // Bubble legado: spawna para tool_results sem skill_id (antes do realtime)
+          if (msg.action && msg.action !== 'ask_jarvis') {
+            setLastSkillEvent({ action: msg.action as string, ts: Date.now() });
+          }
           break;
+
+        // ── Eventos de estado do agente ───────────────────────────────────
+        case 'agent:thinking':
+          setAgentState('thinking');
+          addActivity('thinking', ACTIVITY_LABEL['thinking']);
+          break;
+        case 'agent:planning':
+          setAgentState('planning');
+          addActivity('planning', ACTIVITY_LABEL['planning']);
+          break;
+        case 'agent:compiling':
+          setAgentState('compiling');
+          addActivity('compiling', `Compilando ações (${(msg.model as string) ?? 'fast'})`);
+          break;
+        case 'agent:executing':
+          setAgentState('executing');
+          addActivity('executing', ACTIVITY_LABEL['executing']);
+          break;
+        case 'agent:responding':
+          setAgentState('responding');
+          addActivity('responding', ACTIVITY_LABEL['responding']);
+          break;
+
+        // ── Ciclo de vida das skills ──────────────────────────────────────
+        case 'skill:started': {
+          const skillId = (msg.skill_id as string) ?? '';
+          const action  = (msg.action  as string) ?? '';
+          const label   = formatSkillLabel(action);
+          setAgentState('executing');
+          setActiveSkills(prev => [
+            ...prev,
+            { skillId, action, label, startedAt: new Date(), status: 'running' },
+          ]);
+          setLastSkillEvent({ action, ts: Date.now(), skillId, phase: 'started' });
+          addActivity('skill_start', `Iniciando ${label}`, { skillId, action });
+          break;
+        }
+        case 'skill:completed': {
+          const skillId = (msg.skill_id as string) ?? '';
+          const action  = (msg.action  as string) ?? '';
+          const label   = formatSkillLabel(action);
+          setActiveSkills(prev =>
+            prev.map(s => s.skillId === skillId ? { ...s, status: 'completed' as const } : s)
+          );
+          setLastSkillEvent({ action, ts: Date.now(), skillId, phase: 'completed' });
+          addActivity('skill_done', `Concluído: ${label}`, { skillId, action });
+          // Remove o skill da lista ativa após a animação de saída (~1.2s)
+          setTimeout(() => {
+            setActiveSkills(prev => prev.filter(s => s.skillId !== skillId));
+          }, 1400);
+          break;
+        }
+        case 'skill:failed': {
+          const skillId = (msg.skill_id as string) ?? '';
+          const action  = (msg.action  as string) ?? '';
+          const label   = formatSkillLabel(action);
+          setActiveSkills(prev =>
+            prev.map(s => s.skillId === skillId ? { ...s, status: 'failed' as const } : s)
+          );
+          setLastSkillEvent({ action, ts: Date.now(), skillId, phase: 'failed' });
+          addActivity('skill_fail', `Falhou: ${label}`, { skillId, action });
+          setTimeout(() => {
+            setActiveSkills(prev => prev.filter(s => s.skillId !== skillId));
+          }, 2200);
+          break;
+        }
+        case 'task:blocked': {
+          const action = (msg.action as string) ?? '';
+          setAgentState('blocked');
+          addActivity('blocked', `Confirmação: ${action}`, { action });
+          break;
+        }
+
+        // ── Bloqueio / modal / sistema ────────────────────────────────────
         case 'blocked':
           setBlocked({
             blocked_kind: msg.blocked_kind ?? 'risk',
@@ -280,16 +445,19 @@ export function useVoice() {
           if (!c || nextPlayTimeRef.current <= c.currentTime + 0.1) {
             setStatus('idle');
           }
+          setAgentState('idle');
+          setActiveSkills([]);
           break;
         }
         case 'error':
           setError(msg.message ?? 'Erro desconhecido');
           addEntry('system', `⚠ ${msg.message ?? 'erro'}`);
           setStatus('idle');
+          setAgentState('idle');
           break;
       }
     } catch { /* non-JSON frame */ }
-  }, [addEntry, playAudioChunk]);
+  }, [addEntry, addActivity, playAudioChunk]);
 
   // ── capture teardown ──────────────────────────────────────────────────────
 
@@ -332,6 +500,7 @@ export function useVoice() {
     };
     ws.onclose   = () => {
       setStatus('disconnected');
+      setAgentState('idle');
       stopCapture();
       _stopPoll();
       _stopPing();
@@ -436,10 +605,13 @@ export function useVoice() {
 
   return {
     status,
+    agentState,
     transcript,
     blocked,
     modalPayload,
     lastSkillEvent,
+    activityFeed,
+    activeSkills,
     mode,
     error,
     queueData,

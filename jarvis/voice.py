@@ -39,6 +39,7 @@ from google.genai import types
 
 from .voice_tools import build_voice_tools
 from .modal_payload import extract_modal
+from .events import EventEmitter, wrap_with_emitter
 
 logger = logging.getLogger(__name__)
 
@@ -396,14 +397,38 @@ async def _execute_ask_jarvis(
     call_id: str,
     command: str,
 ) -> None:
-    """Executa agent.run(command) e envia o tool_response de volta ao Gemini."""
+    """Executa agent.run(command) com streaming de eventos realtime ao browser."""
     loop = asyncio.get_event_loop()
+
+    # ── Fila asyncio para bridge thread → async ───────────────────────────────
+    event_queue: asyncio.Queue = asyncio.Queue()
+    _SENTINEL = object()
+
+    # Emitter thread-safe: events do agent chegam aqui via call_soon_threadsafe
+    emitter = EventEmitter(loop, event_queue)
+
+    # Task que drena a fila e envia eventos ao browser em tempo real
+    async def _drain_events() -> None:
+        while True:
+            item = await event_queue.get()
+            if item is _SENTINEL:
+                break
+            await _send_json(websocket, item)
+
+    drain_task = asyncio.create_task(_drain_events())
+
+    # ── Execução do agent em thread com emitter injetado ──────────────────────
+    run_fn = wrap_with_emitter(agent.run, emitter)
     try:
-        result: str = await loop.run_in_executor(_executor, agent.run, command)
+        result: str = await loop.run_in_executor(_executor, run_fn, command)
     except Exception as e:
         result = f"Erro ao executar: {e}"
+    finally:
+        # Sinaliza fim da drain task e aguarda ela terminar
+        await event_queue.put(_SENTINEL)
+        await drain_task
 
-    # Notifica browser do resultado (para UI)
+    # ── Notifica browser do resultado final ───────────────────────────────────
     clean_result, modal = extract_modal(result)
     await _send_json(websocket, {
         "type": "tool_result",

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { VoiceStatus, BlockedInfo, SkillEvent } from '../hooks/useVoice';
+import { VoiceStatus, AgentState, BlockedInfo, SkillEvent } from '../hooks/useVoice';
 import { useSkillBubbles, MOCK_SKILLS } from '../hooks/useSkillBubbles';
 import { VoiceOrb } from './VoiceOrb';
 import { ControlBar } from './ControlBar';
@@ -21,6 +21,7 @@ const DEBUG_LABELS: Record<string, string> = {
 
 interface Props {
   status: VoiceStatus;
+  agentState: AgentState;
   blocked: BlockedInfo | null;
   lastSkillEvent: SkillEvent | null;
   onStart: () => void;
@@ -32,6 +33,7 @@ interface Props {
 
 export function CenterStage({
   status,
+  agentState,
   blocked,
   lastSkillEvent,
   onStart,
@@ -49,13 +51,13 @@ export function CenterStage({
   return (
     <main className="stage">
 
-      {/* Skill execution bubbles — float up from orb area */}
+      {/* Skill execution bubbles — nascem com a skill e saem quando termina */}
       <SkillBubbleLayer bubbles={bubbles} onRemove={removeBubble} />
 
       <div className="stage-inner">
 
-        {/* Orb */}
-        <VoiceOrb status={effectiveStatus} />
+        {/* Orb — reage ao estado de voz E ao estado do agente */}
+        <VoiceOrb status={effectiveStatus} agentState={agentState} />
 
         {/* Controls */}
         <ControlBar
