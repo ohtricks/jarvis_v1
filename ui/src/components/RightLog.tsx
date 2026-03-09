@@ -34,6 +34,21 @@ function MessageEntry({ entry }: { entry: TranscriptEntry }) {
   );
 }
 
+function PartialEntry({ text }: { text: string }) {
+  return (
+    <div className="msg user partial">
+      <div className="msg-meta">
+        <span className="msg-dot" />
+        <span className="msg-role">você</span>
+        <span className="msg-partial-label">transcrevendo</span>
+      </div>
+      <div className="msg-body">
+        {text}<span className="transcript-cursor">▌</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Activity Feed ─────────────────────────────────────────────────────────────
 
 const ACTIVITY_ICON: Partial<Record<ActivityEventType, string>> = {
@@ -160,20 +175,21 @@ interface Props {
   entries: TranscriptEntry[];
   activityFeed: ActivityEvent[];
   historyItems: HistoryItem[];
+  partialTranscript: string | null;
   onRefreshHistory: () => void;
 }
 
-export function RightLog({ entries, activityFeed, historyItems, onRefreshHistory }: Props) {
+export function RightLog({ entries, activityFeed, historyItems, partialTranscript, onRefreshHistory }: Props) {
   const [tab, setTab] = useState<Tab>('activity');
   const bottomRef      = useRef<HTMLDivElement>(null);
   const activityRef    = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll session
+  // Auto-scroll session (apenas quando não há scroll do usuário)
   useEffect(() => {
     if (tab === 'session') {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [entries, tab]);
+  }, [entries, partialTranscript, tab]);
 
   // Auto-scroll activity feed para o fim quando chega novos eventos
   useEffect(() => {
@@ -221,6 +237,7 @@ export function RightLog({ entries, activityFeed, historyItems, onRefreshHistory
         >
           <IconChat />
           sessão
+          {partialTranscript !== null && <span className="log-tab-live" />}
         </button>
         <button
           className={`log-tab ${tab === 'history' ? 'active' : ''}`}
@@ -244,9 +261,15 @@ export function RightLog({ entries, activityFeed, historyItems, onRefreshHistory
             ? <EmptyState text="aguardando execução" />
             : activityFeed.map(e => <ActivityEntry key={e.id} event={e} />)
         ) : tab === 'session' ? (
-          entries.length === 0
-            ? <EmptyState />
-            : entries.map(e => <MessageEntry key={e.id} entry={e} />)
+          <>
+            {entries.length === 0 && partialTranscript === null
+              ? <EmptyState />
+              : entries.map(e => <MessageEntry key={e.id} entry={e} />)
+            }
+            {partialTranscript !== null && (
+              <PartialEntry text={partialTranscript} />
+            )}
+          </>
         ) : (
           historyItems.length === 0
             ? <EmptyState text="nenhum histórico" />

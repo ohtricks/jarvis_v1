@@ -1,12 +1,17 @@
 import { useRef, useState, useCallback } from 'react';
+import { useAudioCapture } from './useAudioCapture';
+import { useAudioPlayback } from './useAudioPlayback';
 
 export type VoiceStatus =
   | 'disconnected'
   | 'connecting'
   | 'idle'
   | 'listening'
+  | 'user_speaking'
   | 'processing'
-  | 'speaking';
+  | 'speaking'
+  | 'interrupted'
+  | 'reconnecting';
 
 // Estado do agente — mais granular que VoiceStatus
 export type AgentState =
@@ -186,35 +191,44 @@ export function useVoice() {
   const [status,        setStatus]        = useState<VoiceStatus>('disconnected');
   const [agentState,    setAgentState]    = useState<AgentState>('idle');
   const [transcript,    setTranscript]    = useState<TranscriptEntry[]>([]);
+  const [partialTranscript, setPartialTranscript] = useState<string | null>(null);
   const [blocked,       setBlocked]       = useState<BlockedInfo | null>(null);
   const [modalPayload,  setModalPayload]  = useState<ModalPayload | null>(null);
   const [lastSkillEvent, setLastSkillEvent] = useState<SkillEvent | null>(null);
   const [activityFeed,  setActivityFeed]  = useState<ActivityEvent[]>([]);
   const [activeSkills,  setActiveSkills]  = useState<ActiveSkill[]>([]);
   const [mode,          setMode]          = useState<'dry' | 'execute'>('dry');
-  const [error,        setError]        = useState<string | null>(null);
-  const [queueData,    setQueueData]    = useState<QueueData | null>(null);
-  const [skills,       setSkills]       = useState<string[]>([]);
-  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
-  const [metrics,      setMetrics]      = useState<SystemMetrics>({ cpu: null, ram: null, wsPing: null, llmMs: null });
-
-  const [isMuted,        setIsMuted]        = useState<boolean>(false);
+  const [error,         setError]         = useState<string | null>(null);
+  const [queueData,     setQueueData]     = useState<QueueData | null>(null);
+  const [skills,        setSkills]        = useState<string[]>([]);
+  const [historyItems,  setHistoryItems]  = useState<HistoryItem[]>([]);
+  const [metrics,       setMetrics]       = useState<SystemMetrics>({ cpu: null, ram: null, wsPing: null, llmMs: null });
 
   const wsRef              = useRef<WebSocket | null>(null);
-  const captureCtxRef      = useRef<AudioContext | null>(null);
-  const playbackCtxRef     = useRef<AudioContext | null>(null);
-  const nextPlayTimeRef    = useRef<number>(0);
-  const streamRef          = useRef<MediaStream | null>(null);
-  const processorRef       = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef          = useRef<MediaStreamAudioSourceNode | null>(null);
-  const isCapturingRef     = useRef<boolean>(false);
-  const isMutedRef         = useRef<boolean>(false);
-  const speakTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollRef            = useRef<ReturnType<typeof setInterval> | null>(null);
   const pingIntervalRef    = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef  = useRef<number>(2000);
   const shouldReconnectRef = useRef<boolean>(false);
+  const isFirstConnectionRef = useRef<boolean>(true);
+  const interruptedTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Sub-hooks: audio capture + playback ───────────────────────────────────
+
+  const {
+    startCapture,
+    stopCapture,
+    isCapturing,
+    isMuted,
+    setMuted,
+    audioLevel,
+  } = useAudioCapture();
+
+  const {
+    playChunk,
+    cancelPlayback,
+    isPlaying: _isPlaying,
+  } = useAudioPlayback();
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -237,54 +251,6 @@ export function useVoice() {
       { id: crypto.randomUUID(), type, label, ts: new Date(), ...extra },
     ]);
   }, []);
-
-  const ensurePlayback = useCallback(async (): Promise<AudioContext> => {
-    if (!playbackCtxRef.current || playbackCtxRef.current.state === 'closed') {
-      playbackCtxRef.current = new AudioContext({ sampleRate: 24000 });
-      nextPlayTimeRef.current = 0;
-    }
-    if (playbackCtxRef.current.state === 'suspended') {
-      await playbackCtxRef.current.resume();
-    }
-    return playbackCtxRef.current;
-  }, []);
-
-  const playAudioChunk = useCallback(async (base64: string) => {
-    try {
-      const ctx = await ensurePlayback();
-      const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-      const int16 = new Int16Array(bytes.buffer);
-      const float32 = new Float32Array(int16.length);
-      for (let i = 0; i < int16.length; i++) {
-        float32[i] = int16[i] / 32768;
-      }
-
-      const buf = ctx.createBuffer(1, float32.length, 24000);
-      buf.getChannelData(0).set(float32);
-
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.connect(ctx.destination);
-
-      const now = ctx.currentTime;
-      const startAt = Math.max(now + 0.02, nextPlayTimeRef.current);
-      src.start(startAt);
-      nextPlayTimeRef.current = startAt + buf.duration;
-
-      setStatus('speaking');
-
-      if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
-      const delayMs = (nextPlayTimeRef.current - now) * 1000 + 300;
-      speakTimerRef.current = setTimeout(() => {
-        const c = playbackCtxRef.current;
-        if (c && nextPlayTimeRef.current <= c.currentTime + 0.15) {
-          setStatus('idle');
-        }
-      }, delayMs);
-    } catch (e) {
-      console.error('Audio playback error:', e);
-    }
-  }, [ensurePlayback]);
 
   // ── polling status (cpu/ram/queue/llm) ───────────────────────────────────
 
@@ -341,12 +307,30 @@ export function useVoice() {
           addActivity('jarvis_command', (msg.command as string) ?? '');
           break;
 
+        // ── Barge-in: usuário interrompeu o Jarvis ────────────────────────
+        case 'interrupted':
+          cancelPlayback();
+          if (interruptedTimerRef.current) clearTimeout(interruptedTimerRef.current);
+          setStatus('interrupted');
+          interruptedTimerRef.current = setTimeout(() => {
+            setStatus('listening');
+            interruptedTimerRef.current = null;
+          }, 400);
+          break;
+
+        // ── Usuário começou a falar (primeiro chunk de transcrição) ────────
+        case 'speech_detected':
+          setStatus('user_speaking');
+          setPartialTranscript('');
+          break;
+
         // ── Voz / transcrição ─────────────────────────────────────────────
         case 'transcript': {
           // Upsert: atualiza a última entrada do usuário se chegou recentemente (streaming),
           // ou cria nova entrada. Garante que todos os chunks de transcrição apareçam completos.
           const text = (msg.text as string ?? '').trim();
           if (text) {
+            setPartialTranscript(text);
             setTranscript(prev => {
               const last = prev[prev.length - 1];
               const isRecentUser = last?.role === 'user' && (Date.now() - last.ts.getTime()) < 8000;
@@ -372,13 +356,20 @@ export function useVoice() {
           addActivity('assistant', msg.text ?? '');
           break;
         case 'audio':
-          if (msg.data) playAudioChunk(msg.data);
+          if (msg.data) {
+            playChunk(
+              msg.data,
+              () => setStatus('speaking'),
+              () => {
+                setStatus(prev => (prev === 'speaking' ? 'idle' : prev));
+              },
+            );
+          }
           break;
 
         // ── Resultado final (legado — mantém compatibilidade) ─────────────
         case 'tool_result':
           if (msg.result) addEntry('system', `[${msg.action ?? 'jarvis'}] ${msg.result}`);
-          // Bubble legado: spawna para tool_results sem skill_id (antes do realtime)
           if (msg.action && msg.action !== 'ask_jarvis') {
             setLastSkillEvent({ action: msg.action as string, ts: Date.now() });
           }
@@ -429,7 +420,6 @@ export function useVoice() {
           );
           setLastSkillEvent({ action, ts: Date.now(), skillId, phase: 'completed' });
           addActivity('skill_done', `Concluído: ${label}`, { skillId, action });
-          // Remove o skill da lista ativa após a animação de saída (~1.2s)
           setTimeout(() => {
             setActiveSkills(prev => prev.filter(s => s.skillId !== skillId));
           }, 1400);
@@ -473,15 +463,12 @@ export function useVoice() {
             setMetrics(prev => ({ ...prev, wsPing: Date.now() - msg.ts }));
           }
           break;
-        case 'done': {
-          const c = playbackCtxRef.current;
-          if (!c || nextPlayTimeRef.current <= c.currentTime + 0.1) {
-            setStatus('idle');
-          }
+        case 'done':
+          setPartialTranscript(null);
+          setStatus(prev => (prev === 'speaking' || prev === 'processing' || prev === 'user_speaking' ? 'idle' : prev));
           setAgentState('idle');
           setActiveSkills([]);
           break;
-        }
         case 'error':
           setError(msg.message ?? 'Erro desconhecido');
           addEntry('system', `⚠ ${msg.message ?? 'erro'}`);
@@ -490,21 +477,7 @@ export function useVoice() {
           break;
       }
     } catch { /* non-JSON frame */ }
-  }, [addEntry, addActivity, playAudioChunk]);
-
-  // ── capture teardown ──────────────────────────────────────────────────────
-
-  const stopCapture = useCallback(() => {
-    isCapturingRef.current = false;
-    processorRef.current?.disconnect();
-    sourceRef.current?.disconnect();
-    processorRef.current = null;
-    sourceRef.current    = null;
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-    captureCtxRef.current?.close().catch(() => {});
-    captureCtxRef.current = null;
-  }, []);
+  }, [addEntry, addActivity, playChunk, cancelPlayback]);
 
   // ── public API ────────────────────────────────────────────────────────────
 
@@ -512,7 +485,6 @@ export function useVoice() {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     if (wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
-    // Cancel any pending reconnect timer
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
@@ -529,43 +501,47 @@ export function useVoice() {
       setSkills(data.skills ?? []);
     } catch { /* ignore */ }
 
-    // Start polling /api/status for mode + queue + cpu/ram/llm
     _startPoll();
 
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen    = () => {
-      reconnectDelayRef.current = 2000; // reset backoff on success
+      reconnectDelayRef.current = 2000;
       setStatus('idle');
-      addEntry('system', 'Conectado.');
+      // Só mostra "Conectado." na primeira conexão
+      if (isFirstConnectionRef.current) {
+        isFirstConnectionRef.current = false;
+        addEntry('system', 'Conectado.');
+      }
       _startPing();
     };
     ws.onclose   = () => {
-      setStatus('disconnected');
       setAgentState('idle');
       stopCapture();
-      isMutedRef.current = false;
-      setIsMuted(false);
+      setMuted(false);
       _stopPoll();
       _stopPing();
 
       if (shouldReconnectRef.current) {
+        // Reconectando silenciosamente
+        setStatus('reconnecting');
         const delay = reconnectDelayRef.current;
         reconnectDelayRef.current = Math.min(delay * 2, 30000);
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
           connect();
         }, delay);
+      } else {
+        setStatus('disconnected');
       }
     };
     ws.onerror   = () => {
-      // onclose will fire right after — let it handle reconnect
       setError('Não foi possível conectar. Verifique se o server Jarvis está rodando em :8899.');
     };
     ws.onmessage = handleMessage;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addEntry, handleMessage, stopCapture, _startPoll, _stopPoll, _startPing, _stopPing]);
+  }, [addEntry, handleMessage, stopCapture, setMuted, _startPoll, _stopPoll, _startPing, _stopPing]);
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false;
@@ -576,22 +552,22 @@ export function useVoice() {
     _stopPoll();
     _stopPing();
     stopCapture();
-    isMutedRef.current = false;
-    setIsMuted(false);
+    setMuted(false);
     wsRef.current?.close();
     wsRef.current = null;
-  }, [stopCapture, _stopPoll, _stopPing]);
+  }, [stopCapture, setMuted, _stopPoll, _stopPing]);
 
   const startListening = useCallback(async () => {
-    // If already capturing (was muted), just unmute
-    if (isCapturingRef.current) {
-      isMutedRef.current = false;
-      setIsMuted(false);
+    const ws = wsRef.current;
+
+    // Se já está capturando (estava muted), apenas desmuta
+    if (isCapturing) {
+      setMuted(false);
       setStatus('listening');
       return;
     }
 
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
       await connect();
       await new Promise<void>(resolve => {
         const t = setInterval(() => {
@@ -607,55 +583,19 @@ export function useVoice() {
     setError(null);
 
     try {
-      await ensurePlayback();
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-      });
-      streamRef.current = stream;
-
-      const captureCtx = new AudioContext({ sampleRate: 16000 });
-      captureCtxRef.current = captureCtx;
-
-      const src = captureCtx.createMediaStreamSource(stream);
-      sourceRef.current = src;
-
-      const processor = captureCtx.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-
-      processor.onaudioprocess = (e) => {
-        if (!isCapturingRef.current) return;
-        if (isMutedRef.current) return;
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
-        const f32 = e.inputBuffer.getChannelData(0);
-        const i16 = new Int16Array(f32.length);
-        for (let i = 0; i < f32.length; i++) {
-          i16[i] = Math.max(-32768, Math.min(32767, f32[i] * 32768));
-        }
-        ws.send(i16.buffer);
-      };
-
-      src.connect(processor);
-      processor.connect(captureCtx.destination);
-
-      isCapturingRef.current = true;
-      isMutedRef.current = false;
-      setIsMuted(false);
+      await startCapture(wsRef.current);
       setStatus('listening');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(`Microfone inacessível: ${msg}`);
     }
-  }, [connect, ensurePlayback]);
+  }, [connect, isCapturing, startCapture, setMuted]);
 
   const stopListening = useCallback(() => {
-    // Mute only — keep capture pipeline alive for quick unmute
-    isMutedRef.current = true;
-    setIsMuted(true);
+    // Mute only — mantém pipeline de captura ativo para unmute rápido
+    setMuted(true);
     setStatus(wsRef.current?.readyState === WebSocket.OPEN ? 'idle' : 'idle');
-  }, []);
+  }, [setMuted]);
 
   const sendConfirmation = useCallback((text: string) => {
     const ws = wsRef.current;
@@ -678,6 +618,8 @@ export function useVoice() {
     status,
     agentState,
     isMuted,
+    audioLevel,
+    partialTranscript,
     transcript,
     blocked,
     modalPayload,

@@ -23,6 +23,8 @@ interface Props {
   status: VoiceStatus;
   agentState: AgentState;
   isMuted: boolean;
+  audioLevel: number;
+  partialTranscript: string | null;
   blocked: BlockedInfo | null;
   lastSkillEvent: SkillEvent | null;
   onStart: () => void;
@@ -36,6 +38,8 @@ export function CenterStage({
   status,
   agentState,
   isMuted,
+  audioLevel,
+  partialTranscript: _partialTranscript,
   blocked,
   lastSkillEvent,
   onStart,
@@ -59,7 +63,7 @@ export function CenterStage({
       <div className="stage-inner">
 
         {/* Orb — reage ao estado de voz E ao estado do agente */}
-        <VoiceOrb status={effectiveStatus} agentState={agentState} />
+        <VoiceOrb status={effectiveStatus} agentState={agentState} audioLevel={audioLevel} />
 
         {/* Controls */}
         <ControlBar

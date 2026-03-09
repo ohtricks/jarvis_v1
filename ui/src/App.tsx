@@ -11,8 +11,11 @@ const STATUS_COLOR: Record<VoiceStatus, string> = {
   connecting:   'var(--amber)',
   idle:         'var(--cyan)',
   listening:    'var(--cyan)',
+  user_speaking:'var(--cyan)',
   processing:   'var(--amber)',
   speaking:     'var(--violet)',
+  interrupted:  'var(--amber)',
+  reconnecting: 'var(--t3)',
 };
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
@@ -20,8 +23,11 @@ const STATUS_LABEL: Record<VoiceStatus, string> = {
   connecting:   'conectando',
   idle:         'aguardando',
   listening:    'ouvindo',
+  user_speaking:'ouvindo',
   processing:   'processando',
   speaking:     'falando',
+  interrupted:  'interrompido',
+  reconnecting: 'reconectando',
 };
 
 export default function App() {
@@ -31,6 +37,8 @@ export default function App() {
     status,
     agentState,
     isMuted,
+    audioLevel,
+    partialTranscript,
     transcript,
     blocked,
     modalPayload,
@@ -120,6 +128,8 @@ export default function App() {
           status={status}
           agentState={agentState}
           isMuted={isMuted}
+          audioLevel={audioLevel}
+          partialTranscript={partialTranscript}
           blocked={blocked}
           lastSkillEvent={lastSkillEvent}
           onStart={startListening}
@@ -133,6 +143,7 @@ export default function App() {
           entries={transcript}
           activityFeed={activityFeed}
           historyItems={historyItems}
+          partialTranscript={partialTranscript}
           onRefreshHistory={refreshHistory}
         />
       </div>

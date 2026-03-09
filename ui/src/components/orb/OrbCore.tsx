@@ -35,6 +35,11 @@ const VOICE_CONFIG: Record<VoiceStatus, OrbConfig> = {
     ringSpeed: 1.80, pulseActive: false, pulseColor: '',
     glowColor: 'rgba(0,225,255,0.40)',
   },
+  user_speaking: {
+    ringSpeed: 2.40, pulseActive: true,
+    pulseColor: 'rgba(0,225,255,0.55)',
+    glowColor: 'rgba(0,235,255,0.50)',
+  },
   processing: {
     ringSpeed: 2.80, pulseActive: false, pulseColor: '',
     glowColor: 'rgba(242,158,22,0.32)',
@@ -43,6 +48,14 @@ const VOICE_CONFIG: Record<VoiceStatus, OrbConfig> = {
     ringSpeed: 2.20, pulseActive: true,
     pulseColor: 'rgba(145,122,255,0.48)',
     glowColor: 'rgba(145,122,255,0.40)',
+  },
+  interrupted: {
+    ringSpeed: 1.60, pulseActive: false, pulseColor: '',
+    glowColor: 'rgba(242,158,22,0.20)',
+  },
+  reconnecting: {
+    ringSpeed: 0.90, pulseActive: false, pulseColor: '',
+    glowColor: 'rgba(0,160,210,0.15)',
   },
 };
 
@@ -95,8 +108,11 @@ const VOICE_CAPTION: Record<VoiceStatus, string> = {
   connecting:   'conectando',
   idle:         'aguardando',
   listening:    'ouvindo',
+  user_speaking:'ouvindo',
   processing:   'processando',
   speaking:     'falando',
+  interrupted:  'interrompido',
+  reconnecting: 'reconectando',
 };
 
 export function OrbCore({ state, agentState = 'idle', intensity = 0.5, audioLevel = 0 }: OrbCoreProps) {

@@ -44,8 +44,11 @@ const PALETTE: Record<VoiceStatus, { main: RGB; hot: RGB; edge: RGB }> = {
   connecting:   { main: [0,  160, 210], hot: [40, 200, 240], edge: [0, 120, 180] },
   idle:         { main: [0,  210, 252], hot: [160, 245, 255], edge: [0, 160, 220] },
   listening:    { main: [0,  230, 255], hot: [180, 250, 255], edge: [0, 180, 240] },
+  user_speaking:{ main: [0,  235, 255], hot: [200, 255, 255], edge: [0, 200, 245] },
   processing:   { main: [242, 160,  20], hot: [255, 215, 100], edge: [200, 100, 10] },
   speaking:     { main: [145, 122, 255], hot: [210, 195, 255], edge: [100,  80, 230] },
+  interrupted:  { main: [242, 158,  22], hot: [255, 200,  60], edge: [180, 100,  10] },
+  reconnecting: { main: [0,  140, 190], hot: [30, 180, 220], edge: [0,  100, 160] },
 };
 
 // ── Population per ring (max pool = speaking) ─────────────────────────────────
@@ -55,8 +58,11 @@ const STATE_POP: Record<VoiceStatus, [number, number, number, number]> = {
   connecting:   [12,  32,   8,  2],
   idle:         [22,  60,  18,  4],
   listening:    [30,  80,  28,  8],
+  user_speaking:[35,  90,  32, 10],
   processing:   [40, 100,  40, 14],
   speaking:     [50, 120,  55, 20],
+  interrupted:  [20,  50,  15,  4],
+  reconnecting: [10,  24,   6,  0],
 };
 
 const MAX_POP: [number, number, number, number] = [50, 120, 55, 20];
@@ -70,8 +76,11 @@ const STATE_SPEED: Record<VoiceStatus, number> = {
   connecting:   0.35,
   idle:         0.50,
   listening:    0.85,
+  user_speaking:1.00,
   processing:   1.40,
   speaking:     1.80,
+  interrupted:  0.60,
+  reconnecting: 0.30,
 };
 
 // ── Factory ───────────────────────────────────────────────────────────────────

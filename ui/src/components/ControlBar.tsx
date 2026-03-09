@@ -6,8 +6,11 @@ const MIC_HINT: Record<VoiceStatus, string> = {
   connecting:   'aguarde',
   idle:         'toque para falar',
   listening:    'ouvindo — toque para mutar',
+  user_speaking:'ouvindo — toque para mutar',
   processing:   'processando',
   speaking:     'falando',
+  interrupted:  'interrompido',
+  reconnecting: 'reconectando...',
 };
 
 function IconMic() {
@@ -65,9 +68,9 @@ export function ControlBar({ status, isMuted, onStart, onStop, onSendText, onDis
   const [showText, setShowText] = useState(false);
   const [textVal, setTextVal]   = useState('');
 
-  const isListening = status === 'listening';
+  const isListening = status === 'listening' || status === 'user_speaking';
   const isBusy      = status === 'connecting' || status === 'processing' || status === 'speaking';
-  const isDisabled  = status === 'disconnected' || isBusy;
+  const isDisabled  = status === 'disconnected' || status === 'reconnecting' || isBusy;
 
   const hint = isMuted && !isListening
     ? 'mutado — toque para falar'

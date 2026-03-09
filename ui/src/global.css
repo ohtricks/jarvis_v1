@@ -1170,6 +1170,38 @@ body::before {
 /* Divider between message groups */
 .msg + .msg.user { margin-top: 4px; }
 
+/* Transcrição parcial */
+.msg.partial {
+  opacity: 0.65;
+}
+.msg.partial .msg-dot {
+  background: var(--cyan);
+  opacity: 0.6;
+  animation: partial-pulse 1.2s ease-in-out infinite;
+}
+.msg-partial-label {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--t3);
+  text-transform: uppercase;
+  margin-left: 4px;
+}
+.transcript-cursor {
+  display: inline-block;
+  color: var(--cyan);
+  opacity: 0.9;
+  animation: cursor-blink 0.9s step-end infinite;
+  margin-left: 1px;
+}
+@keyframes cursor-blink {
+  0%, 100% { opacity: 0.9; }
+  50%       { opacity: 0; }
+}
+@keyframes partial-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+
 /* ── Keyframes ─────────────────────────────────────────────────────────────── */
 
 @keyframes hdr-scan {

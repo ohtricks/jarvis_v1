@@ -417,6 +417,7 @@ async def _run_session(
     """
     _pending_user_text: list[str] = []   # acumula transcrição do usuário até turn_complete
     _pending_jarvis_text: list[str] = [] # acumula texto do Jarvis até turn_complete
+    _user_turn_started: list[bool] = [False]  # flag para emitir speech_detected no 1º chunk
 
     async def _receive_from_browser():
         """Task: lê mensagens do browser e envia ao Gemini."""
@@ -496,10 +497,18 @@ async def _run_session(
                         sc.turn_complete,
                     )
 
+                    # Barge-in: usuário interrompeu o Jarvis enquanto falava
+                    if sc.interrupted:
+                        await _send_json(websocket, {"type": "interrupted"})
+
                     # Transcrição da fala do usuário — streaming: envia cada chunk acumulado
                     # Chunks finais frequentemente chegam após turn_complete; enviar ao vivo
                     # resolve o truncamento. Frontend faz upsert da última entrada do usuário.
                     if sc.input_transcription and sc.input_transcription.text:
+                        # Emite speech_detected no primeiro chunk do turn do usuário
+                        if not _user_turn_started[0]:
+                            _user_turn_started[0] = True
+                            await _send_json(websocket, {"type": "speech_detected"})
                         _pending_user_text.append(sc.input_transcription.text)
                         full_so_far = " ".join(_pending_user_text)
                         await _send_json(websocket, {"type": "transcript", "text": full_so_far})
@@ -522,6 +531,9 @@ async def _run_session(
                                 _pending_jarvis_text.append(part.text)
 
                     if sc.turn_complete:
+                        # Reset flag de turn do usuário para próxima fala
+                        _user_turn_started[0] = False
+
                         # Salva no histórico o texto final acumulado (já enviado por streaming)
                         if _pending_user_text:
                             full_user = " ".join(_pending_user_text)

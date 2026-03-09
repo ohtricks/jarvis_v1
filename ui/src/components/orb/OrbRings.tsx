@@ -30,8 +30,11 @@ const STATE_OPACITY: Record<VoiceStatus, number> = {
   connecting:   0.45,
   idle:         0.65,
   listening:    0.85,
+  user_speaking:0.92,
   processing:   1.0,
   speaking:     0.95,
+  interrupted:  0.50,
+  reconnecting: 0.35,
 };
 
 const STATE_COLOR: Record<VoiceStatus, [string, string]> = {
@@ -39,8 +42,11 @@ const STATE_COLOR: Record<VoiceStatus, [string, string]> = {
   connecting:   ['rgba(0,212,255,',    'rgba(0,150,200,'],
   idle:         ['rgba(0,212,255,',    'rgba(0,180,220,'],
   listening:    ['rgba(0,230,255,',    'rgba(0,200,240,'],
+  user_speaking:['rgba(0,235,255,',    'rgba(0,210,245,'],
   processing:   ['rgba(240,160,32,',   'rgba(200,120,20,'],
   speaking:     ['rgba(149,128,255,',  'rgba(110,90,220,'],
+  interrupted:  ['rgba(242,158,22,',   'rgba(200,120,10,'],
+  reconnecting: ['rgba(0,160,200,',    'rgba(0,120,170,'],
 };
 
 export function OrbRings({ state, ringSpeed }: OrbRingsProps) {
