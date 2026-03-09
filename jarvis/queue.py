@@ -1,4 +1,5 @@
 import json
+import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Optional, Tuple
@@ -36,10 +37,11 @@ def load_queue() -> dict[str, Any]:
 
 def save_queue(q: dict[str, Any]) -> None:
     _ensure_dir()
-    QUEUE_PATH.write_text(
-        json.dumps(q, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    # Write atômico: escreve em arquivo temporário e renomeia.
+    # Evita corrupção de dados em caso de crash ou acesso concorrente.
+    tmp = QUEUE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(q, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(QUEUE_PATH)
 
 
 def clear_queue() -> None:
@@ -61,7 +63,7 @@ def enqueue_plan(goal: str, plan: list[dict]) -> None:
 
         items.append(
             {
-                "id": f"a_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{i+1}",
+                "id": f"a_{uuid.uuid4().hex[:10]}",
                 "ts": now,
                 "step_index": i,
                 "step": step.get("step") or action,

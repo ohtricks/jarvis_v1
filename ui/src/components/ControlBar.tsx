@@ -5,7 +5,7 @@ const MIC_HINT: Record<VoiceStatus, string> = {
   disconnected: 'offline',
   connecting:   'aguarde',
   idle:         'toque para falar',
-  listening:    'ouvindo — toque para parar',
+  listening:    'ouvindo — toque para mutar',
   processing:   'processando',
   speaking:     'falando',
 };
@@ -53,6 +53,7 @@ function IconText() {
 
 interface Props {
   status: VoiceStatus;
+  isMuted: boolean;
   onStart: () => void;
   onStop: () => void;
   onSendText: (text: string) => void;
@@ -60,13 +61,17 @@ interface Props {
   isConnected: boolean;
 }
 
-export function ControlBar({ status, onStart, onStop, onSendText, onDisconnect, isConnected }: Props) {
+export function ControlBar({ status, isMuted, onStart, onStop, onSendText, onDisconnect, isConnected }: Props) {
   const [showText, setShowText] = useState(false);
   const [textVal, setTextVal]   = useState('');
 
   const isListening = status === 'listening';
   const isBusy      = status === 'connecting' || status === 'processing' || status === 'speaking';
   const isDisabled  = status === 'disconnected' || isBusy;
+
+  const hint = isMuted && !isListening
+    ? 'mutado — toque para falar'
+    : MIC_HINT[status];
 
   function handleMic() {
     if (isDisabled) return;
@@ -121,7 +126,7 @@ export function ControlBar({ status, onStart, onStop, onSendText, onDisconnect, 
       </div>
 
       {/* Hint label */}
-      <div className="ctrl-mic-hint">{MIC_HINT[status]}</div>
+      <div className="ctrl-mic-hint">{hint}</div>
 
       {/* Text input (toggleable) */}
       {showText && (

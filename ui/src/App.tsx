@@ -30,6 +30,7 @@ export default function App() {
   const {
     status,
     agentState,
+    isMuted,
     transcript,
     blocked,
     modalPayload,
@@ -118,6 +119,7 @@ export default function App() {
         <CenterStage
           status={status}
           agentState={agentState}
+          isMuted={isMuted}
           blocked={blocked}
           lastSkillEvent={lastSkillEvent}
           onStart={startListening}

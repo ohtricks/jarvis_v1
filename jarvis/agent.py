@@ -53,6 +53,33 @@ class JarvisAgent:
         if patch:
             set_state(patch)
 
+    def _execute_and_format(self, goal: str, stages: list[str]) -> str:
+        """Executa a queue e formata a resposta — reutilizado por planner e executor routes."""
+        stages.append(ux_stage("enfileirando"))
+        stages.append(ux_stage("executando"))
+        emit("agent:executing")
+
+        res = execute_until_blocked_or_recovery(self.SKILLS, self._learn_state_from_action, goal=goal)
+        run_out = res["message"]
+
+        if res["state"] == "recovery_pending":
+            stages.append(ux_stage("recuperação", "aguardando aprovação"))
+            if DEBUG:
+                debug_set("ux_stages", stages)
+            emit("agent:responding")
+            return ux_format_response(stages, run_out, False)
+
+        blocked = has_active_queue()
+        if blocked:
+            stages.append(ux_stage("bloqueado", "aguardando confirmação"))
+        else:
+            stages.append(ux_stage("finalizado"))
+
+        if DEBUG:
+            debug_set("ux_stages", stages)
+        emit("agent:responding")
+        return ux_format_response(stages, run_out, blocked)
+
     def run(self, user_input: str) -> str:
         sess = get_session()
         mode = (sess.get("mode") or "dry").lower()
@@ -111,31 +138,7 @@ class JarvisAgent:
 
                 clear_queue()
                 enqueue_plan(goal, plan)
-
-                stages.append(ux_stage("enfileirando"))
-                stages.append(ux_stage("executando"))
-                emit("agent:executing")
-
-                res = execute_until_blocked_or_recovery(self.SKILLS, self._learn_state_from_action, goal=goal)
-                run_out = res["message"]
-
-                if res["state"] == "recovery_pending":
-                    stages.append(ux_stage("recuperação", "aguardando aprovação"))
-                    if DEBUG:
-                        debug_set("ux_stages", stages)
-                    emit("agent:responding")
-                    return remember(ux_format_response(stages, run_out, False))
-
-                blocked = has_active_queue()
-                if blocked:
-                    stages.append(ux_stage("bloqueado", "aguardando confirmação"))
-                else:
-                    stages.append(ux_stage("finalizado"))
-
-                if DEBUG:
-                    debug_set("ux_stages", stages)
-                emit("agent:responding")
-                return remember(ux_format_response(stages, run_out, blocked))
+                return remember(self._execute_and_format(goal, stages))
 
             # executor route => fast/brain compila 1-3 ações diretas (sem reasoning)
             if r["route"] == "executor":
@@ -156,31 +159,7 @@ class JarvisAgent:
 
                 clear_queue()
                 enqueue_plan(goal, plan)
-
-                stages.append(ux_stage("enfileirando"))
-                stages.append(ux_stage("executando"))
-                emit("agent:executing")
-
-                res = execute_until_blocked_or_recovery(self.SKILLS, self._learn_state_from_action, goal=goal)
-                run_out = res["message"]
-
-                if res["state"] == "recovery_pending":
-                    stages.append(ux_stage("recuperação", "aguardando aprovação"))
-                    if DEBUG:
-                        debug_set("ux_stages", stages)
-                    emit("agent:responding")
-                    return remember(ux_format_response(stages, run_out, False))
-
-                blocked = has_active_queue()
-                if blocked:
-                    stages.append(ux_stage("bloqueado", "aguardando confirmação"))
-                else:
-                    stages.append(ux_stage("finalizado"))
-
-                if DEBUG:
-                    debug_set("ux_stages", stages)
-                emit("agent:responding")
-                return remember(ux_format_response(stages, run_out, blocked))
+                return remember(self._execute_and_format(goal, stages))
 
             return remember("Não consegui processar seu pedido agora.")
 

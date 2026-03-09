@@ -8,9 +8,16 @@ def get_cwd(args: dict) -> str:
     return os.path.expanduser(os.path.expandvars(str(cwd)))
 
 
-def run_git(cmd: str, cwd: str) -> tuple[bool, str]:
+def run_git(cmd, cwd: str) -> tuple[bool, str]:
+    """
+    Executa comando git.
+    - cmd como lista  → shell=False (seguro, sem injeção de shell)
+    - cmd como string → shell=True  (apenas para subcmds internos sem args externos)
+    Prefira sempre passar lista quando args vierem de input externo (ex: mensagem de commit).
+    """
+    use_shell = isinstance(cmd, str)
     try:
-        result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=use_shell, cwd=cwd, capture_output=True, text=True)
         out = (result.stdout or "").strip()
         err = (result.stderr or "").strip()
         combined = (out + "\n" + err).strip() if err else out

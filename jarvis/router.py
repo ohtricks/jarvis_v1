@@ -32,13 +32,14 @@ def route_input(user_input: str) -> dict:
     ]
     raw = ask_llm(msgs, model="fast", temperature=0.0, role="router")
     if DEBUG:
-        print("DEBUG ROUTER:", raw)
+        debug_set("router_raw_response", raw[:500])
 
     data = safe_load(raw)
     route = data.get("route")
     if route not in ("fast_reply", "planner", "executor"):
         debug_set("route", "executor")
         debug_set("route_forced", False)
+        debug_set("route_fallback_reason", f"rota inválida do LLM: '{route}' → fallback executor")
         return {"route": "executor", "needs_actions": True, "executor_model": "fast"}
 
     if route == "fast_reply":
@@ -46,12 +47,15 @@ def route_input(user_input: str) -> dict:
         if not resp:
             debug_set("route", "executor")
             debug_set("route_forced", False)
+            debug_set("route_fallback_reason", "fast_reply sem resposta → fallback executor")
             return {"route": "executor", "needs_actions": False, "executor_model": "fast"}
         debug_set("route", "fast_reply")
         debug_set("route_forced", False)
         return {"route": "fast_reply", "needs_actions": False, "response": resp}
 
     executor_model = _safe_executor_model(data.get("executor_model"))
+    if executor_model != (data.get("executor_model") or "fast"):
+        debug_set("route_fallback_reason", f"executor_model inválido: '{data.get('executor_model')}' → fast")
     debug_set("route", route)
     debug_set("route_forced", False)
     return {

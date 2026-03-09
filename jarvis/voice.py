@@ -257,6 +257,11 @@ def _build_system_prompt(history: list[dict]) -> str:
 
 _executor = ThreadPoolExecutor(max_workers=2)
 
+# Timeout máximo (segundos) para uma execução de ask_jarvis dentro do Gemini Live.
+# O Gemini fecha o WebSocket com 1008 se a tool response demorar demais.
+# Para planos com múltiplos passos, cada passo faz chamadas LLM — ajuste conforme necessário.
+_TOOL_RESPONSE_TIMEOUT = 120  # segundos
+
 
 def _detect_blocked(result: str) -> dict | None:
     """
@@ -491,9 +496,13 @@ async def _run_session(
                         sc.turn_complete,
                     )
 
-                    # Transcrição da fala do usuário — acumula, não envia por chunk
+                    # Transcrição da fala do usuário — streaming: envia cada chunk acumulado
+                    # Chunks finais frequentemente chegam após turn_complete; enviar ao vivo
+                    # resolve o truncamento. Frontend faz upsert da última entrada do usuário.
                     if sc.input_transcription and sc.input_transcription.text:
                         _pending_user_text.append(sc.input_transcription.text)
+                        full_so_far = " ".join(_pending_user_text)
+                        await _send_json(websocket, {"type": "transcript", "text": full_so_far})
 
                     # Transcrição do áudio do Jarvis — acumula, não envia por chunk
                     if sc.output_transcription and sc.output_transcription.text:
@@ -513,10 +522,9 @@ async def _run_session(
                                 _pending_jarvis_text.append(part.text)
 
                     if sc.turn_complete:
-                        # Envia textos completos de uma vez (sem parcelamento)
+                        # Salva no histórico o texto final acumulado (já enviado por streaming)
                         if _pending_user_text:
                             full_user = " ".join(_pending_user_text)
-                            await _send_json(websocket, {"type": "transcript", "text": full_user})
                             history.append({"role": "user", "text": full_user})
                             _pending_user_text.clear()
 
@@ -525,6 +533,10 @@ async def _run_session(
                             await _send_json(websocket, {"type": "response_text", "text": full_jarvis})
                             history.append({"role": "assistant", "text": full_jarvis})
                             _pending_jarvis_text.clear()
+
+                        # Mantém a lista limitada em memória (evita crescimento indefinido)
+                        if len(history) > _HISTORY_MAX_TURNS * 2:
+                            del history[:-_HISTORY_MAX_TURNS]
 
                         await _send_json(websocket, {"type": "done"})
 
@@ -564,6 +576,9 @@ async def _execute_ask_jarvis(
     """Executa agent.run(command) com streaming de eventos realtime ao browser."""
     loop = asyncio.get_event_loop()
 
+    # Notifica o browser do comando que o Gemini enviou ao Jarvis
+    await _send_json(websocket, {"type": "jarvis:command", "command": command})
+
     # ── Fila asyncio para bridge thread → async ───────────────────────────────
     event_queue: asyncio.Queue = asyncio.Queue()
     _SENTINEL = object()
@@ -582,9 +597,20 @@ async def _execute_ask_jarvis(
     drain_task = asyncio.create_task(_drain_events())
 
     # ── Execução do agent em thread com emitter injetado ──────────────────────
+    # asyncio.wait_for garante que retornamos ao Gemini dentro de _TOOL_RESPONSE_TIMEOUT.
+    # Nota: o thread continua rodando após timeout (limitação do run_in_executor),
+    # mas o Gemini recebe uma resposta parcial em vez de fechar o WS com 1008.
     run_fn = wrap_with_emitter(agent.run, emitter)
     try:
-        result: str = await loop.run_in_executor(_executor, run_fn, command)
+        result: str = await asyncio.wait_for(
+            loop.run_in_executor(_executor, run_fn, command),
+            timeout=_TOOL_RESPONSE_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        result = (
+            "A tarefa está demorando mais do que o esperado. "
+            "Tente dividir em comandos menores, ou aguarde e repita o pedido."
+        )
     except Exception as e:
         result = f"Erro ao executar: {e}"
     finally:

@@ -18,8 +18,8 @@ class GitCommitSkill(Skill):
             return msg
         if not self.execute:
             return f'(dry-run) Eu executaria: git commit -m "{message}"  (em {cwd})'
-        safe_msg = message.replace('"', '\\"')
-        ok, out = run_git(f'git commit -m "{safe_msg}"', cwd)
+        # Passa como lista para evitar injeção de shell via caracteres especiais na mensagem
+        ok, out = run_git(["git", "commit", "-m", message], cwd)
         if "nothing to commit" in (out or ""):
             return "Nada para commitar. Working tree limpa."
         return out if out else ("Commit realizado." if ok else "Falha no commit.")

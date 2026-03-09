@@ -42,6 +42,7 @@ export interface SkillEvent {
 // ── Activity Feed ─────────────────────────────────────────────────────────────
 
 export type ActivityEventType =
+  | 'jarvis_command'
   | 'thinking'
   | 'planning'
   | 'compiling'
@@ -162,6 +163,7 @@ function formatSkillLabel(action: string): string {
 }
 
 const ACTIVITY_LABEL: Record<ActivityEventType, string> = {
+  jarvis_command: '',  // label built dynamically (command text)
   thinking:   'Analisando solicitação',
   planning:   'Planejando estratégia',
   compiling:  'Compilando ações',
@@ -196,17 +198,23 @@ export function useVoice() {
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [metrics,      setMetrics]      = useState<SystemMetrics>({ cpu: null, ram: null, wsPing: null, llmMs: null });
 
-  const wsRef            = useRef<WebSocket | null>(null);
-  const captureCtxRef    = useRef<AudioContext | null>(null);
-  const playbackCtxRef   = useRef<AudioContext | null>(null);
-  const nextPlayTimeRef  = useRef<number>(0);
-  const streamRef        = useRef<MediaStream | null>(null);
-  const processorRef     = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef        = useRef<MediaStreamAudioSourceNode | null>(null);
-  const isCapturingRef   = useRef<boolean>(false);
-  const speakTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollRef          = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pingIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isMuted,        setIsMuted]        = useState<boolean>(false);
+
+  const wsRef              = useRef<WebSocket | null>(null);
+  const captureCtxRef      = useRef<AudioContext | null>(null);
+  const playbackCtxRef     = useRef<AudioContext | null>(null);
+  const nextPlayTimeRef    = useRef<number>(0);
+  const streamRef          = useRef<MediaStream | null>(null);
+  const processorRef       = useRef<ScriptProcessorNode | null>(null);
+  const sourceRef          = useRef<MediaStreamAudioSourceNode | null>(null);
+  const isCapturingRef     = useRef<boolean>(false);
+  const isMutedRef         = useRef<boolean>(false);
+  const speakTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRef            = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pingIntervalRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectDelayRef  = useRef<number>(2000);
+  const shouldReconnectRef = useRef<boolean>(false);
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -328,12 +336,37 @@ export function useVoice() {
       const msg = JSON.parse(event.data as string);
       switch (msg.type) {
 
-        // ── Voz / transcrição ─────────────────────────────────────────────
-        case 'transcript':
-          addEntry('user', msg.text ?? '');
-          addActivity('user', msg.text ?? '');
-          setStatus('processing');
+        // ── Comando Gemini → Jarvis ───────────────────────────────────────
+        case 'jarvis:command':
+          addActivity('jarvis_command', (msg.command as string) ?? '');
           break;
+
+        // ── Voz / transcrição ─────────────────────────────────────────────
+        case 'transcript': {
+          // Upsert: atualiza a última entrada do usuário se chegou recentemente (streaming),
+          // ou cria nova entrada. Garante que todos os chunks de transcrição apareçam completos.
+          const text = (msg.text as string ?? '').trim();
+          if (text) {
+            setTranscript(prev => {
+              const last = prev[prev.length - 1];
+              const isRecentUser = last?.role === 'user' && (Date.now() - last.ts.getTime()) < 8000;
+              if (isRecentUser) {
+                return [...prev.slice(0, -1), { ...last, text }];
+              }
+              return [...prev, { id: crypto.randomUUID(), role: 'user', text, ts: new Date() }];
+            });
+            setActivityFeed(prev => {
+              const last = prev[prev.length - 1];
+              const isRecentUser = last?.type === 'user' && (Date.now() - last.ts.getTime()) < 8000;
+              if (isRecentUser) {
+                return [...prev.slice(0, -1), { ...last, label: text }];
+              }
+              return [...prev.slice(-79), { id: crypto.randomUUID(), type: 'user' as ActivityEventType, label: text, ts: new Date() }];
+            });
+            setStatus('processing');
+          }
+          break;
+        }
         case 'response_text':
           addEntry('assistant', msg.text ?? '');
           addActivity('assistant', msg.text ?? '');
@@ -477,10 +510,19 @@ export function useVoice() {
 
   const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (wsRef.current?.readyState === WebSocket.CONNECTING) return;
+
+    // Cancel any pending reconnect timer
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    shouldReconnectRef.current = true;
     setStatus('connecting');
     setError(null);
 
-    // Fetch skills once
+    // Fetch skills once (best-effort)
     try {
       const res  = await fetch(SKILLS_URL);
       const data = await res.json();
@@ -494,6 +536,7 @@ export function useVoice() {
     wsRef.current = ws;
 
     ws.onopen    = () => {
+      reconnectDelayRef.current = 2000; // reset backoff on success
       setStatus('idle');
       addEntry('system', 'Conectado.');
       _startPing();
@@ -502,28 +545,51 @@ export function useVoice() {
       setStatus('disconnected');
       setAgentState('idle');
       stopCapture();
+      isMutedRef.current = false;
+      setIsMuted(false);
       _stopPoll();
       _stopPing();
+
+      if (shouldReconnectRef.current) {
+        const delay = reconnectDelayRef.current;
+        reconnectDelayRef.current = Math.min(delay * 2, 30000);
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          connect();
+        }, delay);
+      }
     };
     ws.onerror   = () => {
+      // onclose will fire right after — let it handle reconnect
       setError('Não foi possível conectar. Verifique se o server Jarvis está rodando em :8899.');
-      setStatus('disconnected');
-      _stopPoll();
-      _stopPing();
     };
     ws.onmessage = handleMessage;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addEntry, handleMessage, stopCapture, _startPoll, _stopPoll, _startPing, _stopPing]);
 
   const disconnect = useCallback(() => {
+    shouldReconnectRef.current = false;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     _stopPoll();
     _stopPing();
     stopCapture();
+    isMutedRef.current = false;
+    setIsMuted(false);
     wsRef.current?.close();
     wsRef.current = null;
   }, [stopCapture, _stopPoll, _stopPing]);
 
   const startListening = useCallback(async () => {
-    if (isCapturingRef.current) return;
+    // If already capturing (was muted), just unmute
+    if (isCapturingRef.current) {
+      isMutedRef.current = false;
+      setIsMuted(false);
+      setStatus('listening');
+      return;
+    }
 
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       await connect();
@@ -559,6 +625,7 @@ export function useVoice() {
 
       processor.onaudioprocess = (e) => {
         if (!isCapturingRef.current) return;
+        if (isMutedRef.current) return;
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -574,6 +641,8 @@ export function useVoice() {
       processor.connect(captureCtx.destination);
 
       isCapturingRef.current = true;
+      isMutedRef.current = false;
+      setIsMuted(false);
       setStatus('listening');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -582,9 +651,11 @@ export function useVoice() {
   }, [connect, ensurePlayback]);
 
   const stopListening = useCallback(() => {
-    stopCapture();
-    setStatus(wsRef.current?.readyState === WebSocket.OPEN ? 'processing' : 'idle');
-  }, [stopCapture]);
+    // Mute only — keep capture pipeline alive for quick unmute
+    isMutedRef.current = true;
+    setIsMuted(true);
+    setStatus(wsRef.current?.readyState === WebSocket.OPEN ? 'idle' : 'idle');
+  }, []);
 
   const sendConfirmation = useCallback((text: string) => {
     const ws = wsRef.current;
@@ -606,6 +677,7 @@ export function useVoice() {
   return {
     status,
     agentState,
+    isMuted,
     transcript,
     blocked,
     modalPayload,

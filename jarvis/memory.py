@@ -60,7 +60,11 @@ def load_memory() -> dict[str, Any]:
 
 def save_memory(data: dict[str, Any]) -> None:
     _ensure_dir()
-    MEMORY_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Write atômico: escreve em arquivo temporário e renomeia.
+    # Evita corrupção de dados em caso de crash ou acesso concorrente.
+    tmp = MEMORY_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(MEMORY_PATH)
 
 
 # -------------------------
@@ -152,10 +156,20 @@ def should_inject_memory(user_input: str) -> bool:
     s = (user_input or "").strip().lower()
     if not s:
         return False
-    # Curto demais: quase sempre é follow-up.
+
+    # Confirmações e comandos de controle não são follow-ups — não injetar contexto desnecessariamente.
+    _CONFIRM_EXACT = {"yes", "y", "sim", "s", "ok", "okay", "confirmar",
+                      "não", "nao", "n", "cancelar", "cancel", "yes i know",
+                      "continuar", "manda ver", "executar tudo"}
+    if s in _CONFIRM_EXACT:
+        return False
+
+    # Input curto que não é confirmação: provavelmente é follow-up
     if len(s) <= 50:
         return True
-    markers = ("agora", "depois", "em seguida", "também", "isso", "essa", "esse", "aí", "ai", "então", "entao", "repete", "novamente")
+
+    markers = ("agora", "depois", "em seguida", "também", "isso", "essa", "esse",
+               "aí", "ai", "então", "entao", "repete", "novamente")
     return any(m in s for m in markers)
 
 

@@ -37,6 +37,7 @@ function MessageEntry({ entry }: { entry: TranscriptEntry }) {
 // ── Activity Feed ─────────────────────────────────────────────────────────────
 
 const ACTIVITY_ICON: Partial<Record<ActivityEventType, string>> = {
+  jarvis_command: '→',
   thinking:   '◌',
   planning:   '◈',
   compiling:  '◎',
@@ -51,6 +52,7 @@ const ACTIVITY_ICON: Partial<Record<ActivityEventType, string>> = {
 };
 
 const ACTIVITY_COLOR: Partial<Record<ActivityEventType, string>> = {
+  jarvis_command: 'var(--cyan)',
   thinking:   'var(--amber)',
   planning:   'var(--amber)',
   compiling:  'var(--amber)',

@@ -22,6 +22,7 @@ const DEBUG_LABELS: Record<string, string> = {
 interface Props {
   status: VoiceStatus;
   agentState: AgentState;
+  isMuted: boolean;
   blocked: BlockedInfo | null;
   lastSkillEvent: SkillEvent | null;
   onStart: () => void;
@@ -34,6 +35,7 @@ interface Props {
 export function CenterStage({
   status,
   agentState,
+  isMuted,
   blocked,
   lastSkillEvent,
   onStart,
@@ -62,6 +64,7 @@ export function CenterStage({
         {/* Controls */}
         <ControlBar
           status={status}
+          isMuted={isMuted}
           onStart={onStart}
           onStop={onStop}
           onSendText={onSendText}

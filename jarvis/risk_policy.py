@@ -13,9 +13,12 @@ POLICY_PATH = Path.home() / ".jarvis" / "risk_policy.json"
 # Defaults idênticos às listas hardcoded do risk.py original +
 # git add / git commit / git stash como safe (operações comuns reversíveis).
 _DEFAULTS: dict = {
+    # Prefixos seguros: exigir comandos completos (nunca "git" sozinho —
+    # isso permitiria git rm -rf, git clean, etc.)
     "safe_prefixes": [
         "pwd", "ls", "whoami", "date",
         "git status", "git diff", "git log", "git branch",
+        "git show", "git fetch", "git remote",
         "git add", "git commit", "git stash",
         "python --version", "python3 --version",
         "node -v", "npm -v", "yarn -v", "pnpm -v",
@@ -23,6 +26,8 @@ _DEFAULTS: dict = {
     "risky_patterns": [
         "git push",
         "git reset --hard",
+        "git reset --soft",
+        "git reset --mixed",
         "git clean -fd",
         "git clean -xdf",
         "docker system prune",
@@ -37,6 +42,10 @@ _DEFAULTS: dict = {
     ],
     "danger_patterns": [
         "rm -rf", "rm -fr",
+        "git rm",
+        "git clean -f",
+        "git filter-branch",
+        "git rebase -i",
         "sudo ",
         "dd ",
         "mkfs",
